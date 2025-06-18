@@ -23,7 +23,13 @@ All the numbers represented below are aggregate percentages.
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(
+  echo = TRUE,
+  dev  = "png",   # use PNG for high‐res bitmaps
+  dpi  = 300,     # render at 300dpi
+  fig.width = 6,   # your preferred width
+  fig.height = 4    # your preferred height
+  )
 
 library(tidyverse)
 library(googlesheets4)
