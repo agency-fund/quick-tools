@@ -70,10 +70,10 @@ cluster_power <- function(
 #===========================
 res <- cluster_power(
   p1               = 0.31,    # baseline practice rate
-  p2               = 0.56,    # target practice rate
-  clusters         = 3,       # number of hospitals
+  p2               = 0.51,    # target practice rate
+  clusters         = 6,       # number of hospitals
   weeks_per_period = 2,       # weeks per arm
-  births_per_week  = 60,      # avg births per week
+  births_per_week  = 15,      # avg births per week
   icc              = 0.02,    # intra-cluster correlation
   alpha            = 0.05,    # significance level
   sweep_weeks      = TRUE,    # include sweep of 1:max_weeks

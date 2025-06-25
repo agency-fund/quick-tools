@@ -35,6 +35,18 @@ library(tidyverse)
 library(googlesheets4)
 library(knitr)
 library(scales)
+
+# library(rsurveycto)
+# auth = rsurveycto::scto_auth('secrets/scto_auth.txt')
+# 
+# form_id = 'whatsapp_norms_survey'
+# d = scto_read(auth, form_id)
+# m = scto_get_form_metadata(auth, form_id)
+# 
+# View(m |> filter(is_deployed == T))
+# 
+# test <- d |> filter(start_survey == 1)
+
 ```
 
 ```{r, include=F}
