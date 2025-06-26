@@ -78,8 +78,8 @@ births_per_week_karnataka = mean(c(259.78, 169.56, 145.44, 133.33,
                                    125.00, 114.11, 102.99, 101.11)) / 31 * 7
 
 res <- cluster_power(
-  p1               = 0.31, # default KMC practice rate from Noora survey
-  p2               = 0.41, # 10% point expected increase due to the social norms intervention
+  p1               = 0.081, # default KMC practice rate from Noora survey (Subramanian et al., 2020)
+  p2               = 0.181, # 10% point expected increase due to the social norms intervention
   clusters         = 8, # 8 hospitals in karnataka
   births_per_week  = births_per_week_karnataka,
   weeks_control      = 2,
@@ -142,7 +142,7 @@ ggplot(df, aes(x = clusters, y = power, color = factor(delta))) +
     x        = "Number of Hospitals (Clusters)",
     y        = "Estimated Power",
     title    = "Power vs. # of Karnataka Hospitals for Various Effect Sizes",
-    subtitle = "2w control → 2w washout → 2w intervention\n(Baseline KMC practice rate = 0.31, ICC = 0.02, births/week = 32)"
+    subtitle = "2w control → 2w washout → 2w intervention\n(Baseline KMC practice rate = 8.1%, ICC = 0.02, births/week = 32)"
   ) +
   ylim(0, 1) +
   theme_minimal(base_size = 14) +
