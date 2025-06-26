@@ -97,9 +97,9 @@ print(res$power)
 #===========================
 
 # Set parameters & build grid of scenarios
-p1              <- 0.31
+p1              <- 0.081
 clusters_vec    <- 2:8         # 2 through 8 hospitals
-deltas          <- seq(0.10, 0.30, by = 0.05)  # +10pp to +30pp
+deltas          <- seq(0.05, 0.20, by = 0.05)  # +10pp to +30pp
 
 # create data frame of all combinations
 df <- expand.grid(
