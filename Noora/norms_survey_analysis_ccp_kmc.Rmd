@@ -1,5 +1,5 @@
 ---
-title: "WA Norms Survey Analysis"
+title: "Noora Health - WhatsApp Norms Survey Analysis"
 author: "Zezhen Wu"
 date: "`r Sys.Date()`"
 output:
@@ -8,92 +8,176 @@ output:
   html_document:
     toc: true
     toc_float:
-      collapsed: false
+      collapsed: true
       smooth_scroll: true
 ---
 
-The analysis for the survey has been done for 503 participants who responded to the short survey. 
+# TL;DR
 
-All the numbers represented below are aggregate percentages.
+The survey analysis covers 770 participants across three forms (2505202343, 2505202344, 2505202350), with barrier questions asked only in forms 2505202343 and 2505202344. All figures below are aggregate percentages.
 
-- PB: Punjab
-- KT: Karnataka
-- MP: Madhya Pradesh
-- MH: Maharashtra
+**State abbreviations**
+- **PB:** Punjab  
+- **KT:** Karnataka  
+- **MP:** Madhya Pradesh  
+- **MH:** Maharashtra  
+
+**1. High agreement with norms messages**
+
+- Overall agreement is very strong (> 70% across all items; most > 80%, some > 90%).  
+
+- Cultural acquiescence to Likert scales may inflate these percentages, but we should still use them to guide message design (e.g., **94.3%** of mothers in Karnataka agree that “Doing KMC helps babies bond with their caregivers/parents”).
+
+**2. Barrier questions and framing effects**
+
+- Most participants report “no problem” with KMC, cord care, and diet.  
+
+- Positively framed statements see near-universal agreement, whereas negatively framed items (e.g., “I disapprove of putting oil, powder, ghee, ash, turmeric, or cow dung on a baby’s cord”) and nuanced diet statements (“It’s good to eat all types of hot or cold food postpartum” and “Eating any type of hot or cold food won’t negatively impact mother or baby”) show greater response variability.
+
+**3. Self-reported KMC practice vs. historical benchmarks**
+
+- **Current self-reported KMC rate:** 51.4% overall (PB: 44.1%; KT: 49.6%; MP: 67.2%; MH: 57.9%).  
+
+- Substantially higher than the **8.1%** reported in Subramanian et al. (2020), likely reflecting differences in KMC explanation to participants and our use of convenience sampling.  
 
 
-```{r setup, include=FALSE}
+```{r setup, include=F}
 knitr::opts_chunk$set(
-  echo = TRUE,
   dev  = "png",   # use PNG for high‐res bitmaps
   dpi  = 300,     # render at 300dpi
   fig.width = 6,   # your preferred width
-  fig.height = 4    # your preferred height
+  fig.height = 4,    # your preferred height
+  echo=FALSE, 
+  results='asis'
   )
 
 library(tidyverse)
-library(googlesheets4)
-library(knitr)
+library(lubridate)
+# library(googlesheets4)
 library(scales)
+library(rsurveycto)
+library(knitr)
+library(kableExtra)
 
-# library(rsurveycto)
-# auth = rsurveycto::scto_auth('secrets/scto_auth.txt')
-# 
-# form_id = 'whatsapp_norms_survey'
-# d = scto_read(auth, form_id)
-# m = scto_get_form_metadata(auth, form_id)
-# 
-# View(m |> filter(is_deployed == T))
-# 
-# test <- d |> filter(start_survey == 1)
+# load data from surveycto server
+auth = rsurveycto::scto_auth(here::here('secrets/scto_auth.txt'))
+
+form_id = 'whatsapp_norms_survey'
+d = scto_read(auth, form_id)
+m = scto_get_form_metadata(auth, form_id)
+
+# select usable data
+dat <- d |> 
+  filter(start_survey == 1) |> 
+  filter(formdef_version %in% c("2505202350", "2505202341", "2505202343", "2505202344")) |> 
+  filter(
+    !between(
+      date(starttime),
+      ymd("2025-05-23"),
+      ymd("2025-05-25")
+    )
+  )
 
 ```
 
-```{r, include=F}
+```{r load google data, include=F}
 # load data
-sheet_url <- "https://docs.google.com/spreadsheets/d/1zZLUIFtPDegqX1fIx96NajCS4rIs-6AnwBtK7lUtf3Q/edit?gid=870695215#gid=870695215"
-
-sheet_names(sheet_url)
-
-dat <- read_sheet(sheet_url, sheet = "short survey data")
+# sheet_url <- "https://docs.google.com/spreadsheets/d/1zZLUIFtPDegqX1fIx96NajCS4rIs-6AnwBtK7lUtf3Q/edit?gid=870695215#gid=870695215"
+# 
+# sheet_names(sheet_url)
+# 
+# dat <- read_sheet(sheet_url, sheet = "short survey data")
 ```
 
-```{r, include=F}
+```{r data cleaning function, include=F}
+make_multiselect_dummies <- function(df, vars, sep = "\\s+") {
+  # 1) add row ID
+  df %>% 
+    mutate(.row = row_number()) -> df_id
+  
+  # 2) for each variable, build its dummy block and join back
+  for (var in vars) {
+    df_id %>%
+      transmute(.row,
+                choice = str_trim(as.character(.data[[var]]))) %>%
+      separate_rows(choice, sep = sep) %>%
+      filter(!is.na(choice), choice != "") %>%
+      mutate(present = 1) %>%
+      pivot_wider(
+        id_cols       = .row,
+        names_from    = choice,
+        values_from   = present,
+        values_fill   = list(present = 0),
+        names_prefix  = paste0(var, "_")
+      ) -> dummies
+    
+    df_id <- df_id %>% left_join(dummies, by = ".row")
+  }
+  
+  # 3) drop helper and originals
+  df_id %>%
+    select(-.row, -all_of(vars))
+}
+
+```
+
+```{r data prep, include=F}
 # 0) data prep
-dat_s <- dat |> 
-  select(state, date, phn_nmbr,
-         relation, kmc_who_1:kmc_who_88,
-         cord, cord_apply_1:cord_apply_77,
-         diet:category, state_resp, bpl:religion) |> 
-  rename(month_baby = `Age of the baby`)
 
+## recode multiselect variables
+dat_s <- make_multiselect_dummies(
+  dat,
+  vars = c("reduce_diet", "kmc_prac_hard", "cord_hard", "hard_diet")
+)
 
-# 1) helper recode functions
-recode_belief <- function(x) {
-  recode(as.character(x),
-         `1`  = "Agree",
-         `0`  = "Disagree",
-         `77` = "Don't know",
-         `33` = "Don't want to respond",
-         .default = NA_character_)
-}
+## select variables
+dat_s <- dat_s |> 
+  select(formdef_version, state, date, phn_nmbr, relation, 
+         age, mthr_age, type_del, sex_baby, birth_date, first_baby, first_baby_mthr, weight, 
+         highest_qual, mthr_qual, occupation_cgr, mthr_occupation, category, 
+         state_resp, bpl, help_mthr, religion, # demographics
+         
+         kmc_perform, kmc_perform_othr, kmc_who_1, kmc_who_2, kmc_who_3, kmc_who_4, kmc_who_88, # KMC practice
+         cord, cord_apply_1, cord_apply_2, cord_apply_3, cord_apply_4, cord_apply_5, cord_apply_77, cord_apply_88, # Cord care practice
+         diet, diet_mthr, reduce_diet_1, reduce_diet_2, reduce_diet_3, reduce_diet_4, reduce_diet_77, reduce_diet_88, # Diet practice
+         
+         physcl_benefit, bond, sleep, warm, engaging, othr_parents, own, birth_wgt, sick, father_kmc, do_kmc, mothr_kmc, family_kmc, # KMC norms
+         risk, avoid, best_way, wash, infection, dry, clean, disapprove, # Cord care norms
+         nutritious, all_types, hotcold, variety_mthr, variety, reduce, sickfood, drink, optimise, optimise_mthr, # Diet practice
+         
+         kmc_prac_hard_1, kmc_prac_hard_2, kmc_prac_hard_3, kmc_prac_hard_5, kmc_prac_hard_6, 
+         kmc_prac_hard_7, kmc_prac_hard_8, kmc_prac_hard_9, kmc_prac_hard_11, kmc_prac_hard_88, kmc_prac_othr, # KMC barriers
+         
+         cord_hard_1, cord_hard_2, cord_hard_4, cord_hard_5, cord_hard_6, cord_hard_7, cord_hard_8, cord_hard_88, cord_hard_othr, # Cord care barriers
+         
+         hard_diet_1, hard_diet_2, hard_diet_3, hard_diet_5, hard_diet_6, hard_diet_88, hard_diet_othr # Diet barriers
+         )
 
-recode_yesno_dk <- function(x) {
-  recode(as.character(x),
-         `1`  = "Yes",
-         `2`  = "No",
-         `77` = "Don't know",
-         .default = NA_character_)
-}
+# labels
+belief_labs <- c(
+  `1`  = "Agree",
+  `0`  = "Disagree",
+  `77` = "Don't know",
+  `33` = "Don't want to respond"
+)
 
-recode_bin01 <- function(x, yes = "Yes", no = "No") {
-  recode(as.character(x),
-         `1` = yes,
-         `0` = no,
-         .default = NA_character_)
-}
+yesno_labs <- c(
+  `1`  = "Yes",
+  `0`  = "No"
+)
 
-# 2) shared label vectors
+yesnodont1_labs <- c(
+  `1`  = "Yes",
+  `2`  = "No",
+  `77` = "Don't know"
+)
+
+yesnodont2_labs <- c(
+  `1`  = "Yes",
+  `0`  = "No",
+  `77` = "Don't know"
+)
+
 state_labs <- c(
   `1` = "Karnataka",
   `2` = "Madhya Pradesh",
@@ -174,19 +258,15 @@ dat_s <- dat_s %>%
     relation = recode(relation, !!!rel_labs),
 
     # simple yes/no/dk
-    across(c(diet, cord, bpl), recode_yesno_dk),
+    across(c(diet_mthr, first_baby, first_baby_mthr, kmc_who_1:kmc_who_88, reduce_diet_1:reduce_diet_88, cord_apply_1:cord_apply_77, kmc_prac_hard_1:hard_diet_88),
+           ~ recode(.x, !!!yesno_labs)),
 
     # binary 1/0 → Yes/No
-    across(c(diet_mthr, first_baby, first_baby_mthr, kmc_who_1:kmc_who_88, cord_apply_1:cord_apply_77), recode_bin01),
+    across(c(bpl, cord, diet),  ~ recode(.x, !!!yesnodont1_labs)),
+    across(c(kmc_perform, kmc_perform_othr),  ~ recode(.x, !!!yesnodont2_labs)),
 
     # beliefs: KMC, cord‐care & diet beliefs
-    across(c(
-      physcl_benefit, bond, engaging, othr_parents, own,
-      father_kmc, do_kmc, family_kmc,
-      risk, avoid, best_way, wash, clean,
-      nutritious, hotcold, variety_mthr, variety,
-      reduce, sickfood, optimise, optimise_mthr
-    ), recode_belief),
+    across(c(physcl_benefit:optimise_mthr), ~ recode(.x, !!!belief_labs)),
 
     # delivery & baby
     type_del = recode(type_del, !!!type_del_labs),
@@ -203,230 +283,133 @@ dat_s <- dat_s %>%
     # state of the respondent
     state_resp = recode(state_resp,   !!!state_resp_labs)
     
-    # leave age, weight, date, phone, month_baby, other‐text fields as is
   )
 
-```
 
-```{r, include=F}
-# 4) variable titles from the codebook
-var_labels <- c(
-  state          = "State of interview",
-  relation       = "Respondent’s relation to baby",
-  kmc_who_1      = "KMC by Mother",
-  kmc_who_2      = "KMC by Father",
-  kmc_who_3      = "KMC by Maternal grandmother",
-  kmc_who_4      = "KMC by Paternal grandmother",
-  kmc_who_88     = "KMC by Other",
-  cord           = "Cord care applied?",
-  cord_apply_1   = "Cord care: Talcum/Baby powder",
-  cord_apply_2   = "Cord care: Oil or ghee",
-  cord_apply_3   = "Cord care: Blue medicine",
-  cord_apply_4   = "Cord care: Betadine",
-  cord_apply_5   = "Cord care: Turmeric powder/oil",
-  cord_apply_77  = "Cord care: Other",
-  cord_apply_88  = "Cord care: Don't know",
-  diet           = "Did mother reduce diet?",
-  diet_mthr      = "Mother reduced her own diet?",
- physcl_benefit  = "“Doing KMC is physically beneficial for babies’ health (e.g. prevents illnesses and infections, helps them gain weight and grow faster, helps keep them warm)”", # :contentReference[oaicite:17]{index=17}
-  bond            = "“Doing KMC helps babies bond with their caregivers/parents”",                                              # :contentReference[oaicite:18]{index=18}
-  engaging        = "“Engaging in KMC is good for both babies and their caregivers/parents”",                                    # :contentReference[oaicite:19]{index=19}
-  othr_parents    = "“I approve of other parents engaging in KMC with their babies”",                                           # :contentReference[oaicite:20]{index=20}
-  own             = "“I try my best to engage in KMC with the baby”",                                                          # :contentReference[oaicite:21]{index=21}
-  father_kmc      = "“Fathers should engage in KMC with their babies”",                                                       # :contentReference[oaicite:22]{index=22}
-  do_kmc          = "“I would like to do KMC with the baby”",                                                                 # :contentReference[oaicite:23]{index=23}
-  family_kmc      = "“Families should do KMC with their babies”",                                                              # :contentReference[oaicite:24]{index=24}
+# Merge mutually exclusive questions separated for mothers and other respondents
+dat_s <- dat_s %>%
+  mutate(
+    first_baby_mother = case_when(
+      relation == "Mother" & !is.na(first_baby)      ~ first_baby,
+      relation != "Mother" & !is.na(first_baby_mthr) ~ first_baby_mthr,
+      TRUE                                            ~ NA_character_
+    )) |> 
+   mutate(
+    diet_mother = case_when(
+      relation == "Mother" & !is.na(diet_mthr)      ~ diet_mthr,
+      relation != "Mother" & !is.na(diet) ~ diet,
+      TRUE                                            ~ NA_character_
+    )) |> 
+  mutate(
+    variety_mother = case_when(
+      relation == "Mother" & !is.na(variety_mthr)      ~ variety_mthr,
+      relation != "Mother" & !is.na(variety) ~ variety,
+      TRUE                                            ~ NA_character_
+    )) |> 
+  mutate(
+    optimise_mother = case_when(
+      relation == "Mother" & !is.na(optimise_mthr)      ~ optimise_mthr,
+      relation != "Mother" & !is.na(optimise) ~ optimise,
+      TRUE                                            ~ NA_character_
+    )) |> 
+  mutate(
+    age_mother = case_when(
+      relation == "Mother" & !is.na(age)      ~ age,
+      relation != "Mother" & !is.na(mthr_age) ~ mthr_age,
+      TRUE                                            ~ NA_character_
+    )) |> 
+  mutate(
+    highest_qual_mother = case_when(
+      relation == "Mother" & !is.na(highest_qual)      ~ highest_qual,
+      relation != "Mother" & !is.na(mthr_qual) ~ mthr_qual,
+      TRUE                                            ~ NA_character_
+    )) |> 
+  mutate(
+    occupation_mother = case_when(
+      relation == "Mother" & !is.na(occupation_cgr)      ~ occupation_cgr,
+      relation != "Mother" & !is.na(mthr_occupation) ~ mthr_occupation,
+      TRUE                                            ~ NA_character_
+    ))
 
-  risk            = "“It is risky to apply oil, powder, ghee, ash, turmeric, or cow dung on the baby’s cord.”",                     # :contentReference[oaicite:25]{index=25}
-  avoid           = "“Parents and caregivers should avoid applying oil, powder, ghee, ash, turmeric, or cow dung on a baby’s cord.”", # :contentReference[oaicite:26]{index=26}
-  best_way        = "“Keeping the cord dry is the best way to prevent infection.”",                                                # :contentReference[oaicite:27]{index=27}
-  wash            = "“The best way to properly care for a baby’s cord is to wash it with a gentle soap and water during baths and dry it immediately after.”", # :contentReference[oaicite:28]{index=28}
-  clean           = "“I want to keep baby’s cord clean and dry.”",                                                              # :contentReference[oaicite:29]{index=29}
+# recode numeric variables
+dat_s <- dat_s |> 
+  mutate(across(c(help_mthr, weight, age_mother), as.numeric))
 
-  nutritious      = "“Eating all kinds of nutritious foods, regardless of whether it is hot or cold food, helps a mother recover and produce more breastmilk.”",       # :contentReference[oaicite:30]{index=30}
-  hotcold         = "“Eating any type of hot or cold food won’t negatively impact the mother or the baby (i.e. cause gas or sickness).”",                             # :contentReference[oaicite:31]{index=31}
-  variety_mthr    = "“I do my best to eat a variety of nutritious foods and not restrict my diet after delivery.”",                                              # :contentReference[oaicite:32]{index=32}
-  variety         = "“I do my best to help the mother eat a variety of nutritious foods and avoid restricting her diet after delivery.”",                          # :contentReference[oaicite:33]{index=33}
-  reduce          = "“It’s not ok to reduce the amount of food or water from a mother’s diet for the health of her or the baby.”",                                    # :contentReference[oaicite:34]{index=34}
-  sickfood        = "“Even if the mom or baby is sick, the mom should not stop eating certain foods.”",                                                           # :contentReference[oaicite:35]{index=35}
-  optimise        = "“I try to make sure the mother drinks at least 2 liters (or 8–10 glasses) of water a day to support healthy milk production.”",               # :contentReference[oaicite:36]{index=36}
-  optimise_mthr   = "“I try to drink at least 2 Liters of (or 8-10 glasses) of water a day to optimize my milk production.”",                                      # :contentReference[oaicite:37]{index=37}
-  age            = "Respondent age (years)",
-  mthr_age       = "Mother’s age (years)",
-  type_del       = "Type of delivery",
-  sex_baby       = "Sex of baby",
-  month_baby     = "Baby’s age in months",
-  first_baby     = "Is this the first baby?",
-  first_baby_mthr= "Is this mother’s first baby?",
-  weight         = "Birth weight (grams)",
-  highest_qual   = "Respondent education level",
-  mthr_qual      = "Mother’s education level",
-  occupation_cgr = "Respondent occupation category",
-  mthr_occupation= "Mother’s occupation category",
-  category       = "Social category",
-  state_resp     = "State of respondent",
-  bpl            = "Below poverty line?",
-  help_mthr      = "Did anyone help mother?",
-  religion       = "Religion"
-)
 
 ```
 
-```{r, include=F}
-# Plot functions
+```{r variable labels, include=F}
+var_labels_df <- data.frame(name = names(dat_s)) |> 
+  left_join(m[[8]][[6]] |> select(name, `label:English`), by = "name") |> 
+  rename(description = `label:English`)
 
-# Yes/No dummies — narrower bars + rotated x labels
-plot_bar_dummy <- function(df, var, label) {
-  total_n <- nrow(df)
-  ggplot(df, aes(x = factor(.data[[var]]), fill = factor(.data[[var]]))) +
-    geom_bar(width = 0.7) +                            # narrower
-    geom_text(
-      stat = "count",
-      aes(
-        label = paste0(
-          "N = ", after_stat(count),
-          "\n", percent(after_stat(count) / total_n)
-        )
-      ),
-      position = position_stack(vjust = 1),
-      color    = "black",
-      size     = 3
-    ) +
-    scale_fill_manual(
-      values   = c("Yes" = "forestgreen", "No" = "firebrick"),
-      na.value = "grey80",
-      guide    = FALSE
-    ) +
-    labs(title = label, x = NULL, y = "Count") +
-    theme_minimal() +
-    theme(
-      axis.text.x = element_text(angle = 45, hjust = 1)  # rotate labels
+var_labels_df <- var_labels_df |> 
+  mutate(
+    description = case_when(
+      name == "kmc_who_1" ~ "Who did this care? - Mother",
+      name == "kmc_who_2" ~ "Who did this care? - Father",
+      name == "kmc_who_3" ~ "Who did this care? - Maternal grandmother",
+      name == "kmc_who_4" ~ "Who did this care? - Paternal grandmother",
+      name == "kmc_who_88" ~ "Who did this care? - Other",
+      
+      name == "cord_apply_1" ~ "What did you put on the baby’s cord? - Talcum/babyPowder",
+      name == "cord_apply_2" ~ "What did you put on the baby’s cord? - Oil or ghee",
+      name == "cord_apply_3" ~ "What did you put on the baby’s cord? - Blue medicine",
+      name == "cord_apply_4" ~ "What did you put on the baby’s cord? - Betadine (Surgical powder or medicine)",
+      name == "cord_apply_5" ~ "What did you put on the baby’s cord? - Turmeric powder/oil with turmeric powder",
+      name == "cord_apply_77" ~ "What did you put on the baby’s cord? - Don’t Know",
+      name == "cord_apply_88" ~ "What did you put on the baby’s cord? - Other",
+      
+      name == "reduce_diet_1" ~ "What did you reduce or eliminate in the diet? - Yogurt",
+      name == "reduce_diet_2" ~ "What did you reduce or eliminate in the diet? - Citrus fruits",
+      name == "reduce_diet_3" ~ "What did you reduce or eliminate in the diet? - Non-vegetarian food",
+      name == "reduce_diet_4" ~ "What did you reduce or eliminate in the diet? - Lentils",
+      name == "reduce_diet_77" ~ "What did you reduce or eliminate in the diet? - Don’t Know",
+      name == "reduce_diet_88" ~ "What did you reduce or eliminate in the diet? - Other",
+      
+      name == "kmc_prac_hard_1"  ~ "What made it hard to practice KMC? - People think KMC is only for weak or small babies",
+      name == "kmc_prac_hard_2"  ~ "What made it hard to practice KMC? - Mothers feel shy or uncomfortable opening their clothes",
+      name == "kmc_prac_hard_3"  ~ "What made it hard to practice KMC? - Family elders say it's not needed",
+      name == "kmc_prac_hard_5"  ~ "What made it hard to practice KMC? - Mothers are in pain or tired after delivery",
+      name == "kmc_prac_hard_6"  ~ "What made it hard to practice KMC? - Lack of privacy at home",
+      name == "kmc_prac_hard_7"  ~ "What made it hard to practice KMC? - Families don’t understand KMC properly during the hospital session",
+      name == "kmc_prac_hard_8"  ~ "What made it hard to practice KMC? - Families don’t feel confident in doing KMC at home",
+      name == "kmc_prac_hard_9"  ~ "What made it hard to practice KMC? - Families forgot or didn’t think it was important",
+      name == "kmc_prac_hard_11" ~ "What made it hard to practice KMC? - Mothers are expected to help others, but feel uncomfortable asking for help with KMC",
+      name == "kmc_prac_hard_88" ~ "What made it hard to practice KMC? - Other (please type)",
+
+      name == "cord_hard_1"  ~ "What made it hard to practice dry cord care? - Family elders said to apply oil, powder, or home remedies",
+      name == "cord_hard_2"  ~ "What made it hard to practice dry cord care? - Parents and caregivers are not convinced that dry cord care is enough",
+      name == "cord_hard_4"  ~ "What made it hard to practice dry cord care? - Parents and caregivers are concerned that others would judge them for engaging in dry cord care",
+      name == "cord_hard_5"  ~ "What made it hard to practice dry cord care? - They do not understand how to take care of the cord",
+      name == "cord_hard_6"  ~ "What made it hard to practice dry cord care? - They thought applying oil or powder would help with healing or preventing infections",
+      name == "cord_hard_7"  ~ "What made it hard to practice dry cord care? - The hospital did not explain cord care clearly",
+      name == "cord_hard_8"  ~ "What made it hard to practice dry cord care? - They forgot what was said in the hospital session",
+      name == "cord_hard_88" ~ "What made it hard to practice dry cord care? - Other (please type)",
+      
+      name == "hard_diet_1"  ~ "What made it hard to eat a nutritious diet? - Family elders do not believe mothers should be eating certain foods post-delivery",
+      name == "hard_diet_2"  ~ "What made it hard to eat a nutritious diet? - They were told to avoid cold, spicy, or hard foods",
+      name == "hard_diet_3"  ~ "What made it hard to eat a nutritious diet? - Mother was not allowed to eat enough or certain foods or water by her family members, even if she prepared the food at home",
+      name == "hard_diet_5"  ~ "What made it hard to eat a nutritious diet? - The hospital session said not to restrict food intake, but we don’t believe that’s the right approach",
+      name == "hard_diet_6"  ~ "What made it hard to eat a nutritious diet? - We were afraid it would harm the baby or the mother (e.g., gas, pain, cold)",
+      name == "hard_diet_88" ~ "What made it hard to eat a nutritious diet? - Other (please type)",
+      
+      name == "first_baby_mother" ~ "Is this mother's first baby?",
+      name == "diet_mother" ~ "Since the baby was born, has the mother reduced or eliminated anything in her diet (food or water)?",
+      name == "variety_mother" ~ "“I do my best to (help the mother) eat a variety of nutritious foods and avoid restricting her diet after delivery.”",
+      name == "optimise_mother" ~ "“I try to (make sure the mother) drink(s) at least 2 liters (or 8–10 glasses) of water a day to support healthy milk production.”",
+      name == "age_mother" ~ "What is baby's mother's age?",
+      name == "highest_qual_mother" ~ "What is mother’s highest educatio",
+      name == "occupation_mother" ~ "What is the mother’s occupation?",
+      TRUE ~ description
     )
-}
+  )
 
-# General categoricals — narrower bars + rotated x labels
-plot_bar_cat <- function(df, var, label) {
-  total_n <- nrow(df)
-  ggplot(df, aes(x = fct_infreq(factor(.data[[var]])), fill = factor(.data[[var]]))) +
-    geom_bar(width = 0.7) +                            # narrower
-    geom_text(
-      stat = "count",
-      aes(
-        label = paste0(
-          "N = ", after_stat(count),
-          "\n", percent(after_stat(count) / total_n)
-        )
-      ),
-      position = position_stack(vjust = 1),
-      color    = "black",
-      size     = 3
-    ) +
-    scale_fill_brewer(palette = "Set3", na.value = "grey80", guide = FALSE) +
-    labs(title = label, x = NULL, y = "Count") +
-    theme_minimal() +
-    theme(
-      axis.text.x = element_text(angle = 45, hjust = 1)  # rotate labels
-    )
-}
+var_labels <- setNames(var_labels_df$description, var_labels_df$name)
 
-# Continuous boxplots
-plot_hist <- function(df, var, label, binwidth = 1) {
-  vals     <- df[[var]]
-  n_total  <- sum(!is.na(vals))
-  mean_val <- mean(vals, na.rm = TRUE)
-  sd_val   <- sd(vals, na.rm = TRUE)
-  
-  # get max count for padding
-  h <- hist(vals,
-            breaks = seq(min(vals, na.rm=TRUE) - 0.5,
-                         max(vals, na.rm=TRUE) + 0.5,
-                         by = binwidth),
-            plot   = FALSE)
-  y_max <- max(h$counts)
-  
-  ggplot(df, aes(x = .data[[var]])) +
-    # counts histogram
-    geom_histogram(
-      aes(y = after_stat(count)),
-      binwidth = binwidth,
-      fill     = "steelblue",
-      alpha    = 0.6,
-      color    = "white"
-    ) +
-    # density curve scaled to counts
-    geom_density(
-      aes(y = after_stat(density * n_total * binwidth)),
-      color = "darkblue",
-      size  = 1
-    ) +
-    # red mean line
-    geom_vline(
-      xintercept = mean_val,
-      color      = "red",
-      linetype   = "dashed",
-      size       = 1
-    ) +
-    # annotate mean & SD
-    annotate(
-      "text",
-      x     = mean_val,
-      y     = y_max * 1.05,
-      label = paste0("M = ", round(mean_val, 1), 
-                     "; SD = ", round(sd_val, 1)),
-      hjust = 0.5,
-      vjust = 0
-    ) +
-    # pad y‐axis for text
-    scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
-    labs(
-      title = label,
-      x     = label,
-      y     = "Count"
-    ) +
-    theme_minimal()
-}
-
-plot_density <- function(df, var, label, adjust = 1) {
-  vals     <- df[[var]]
-  mean_val <- mean(vals, na.rm = TRUE)
-  sd_val   <- sd(vals, na.rm = TRUE)
-
-  ggplot(df, aes(x = .data[[var]])) +
-    # smooth density curve
-    geom_density(
-      color = "darkblue",
-      fill  = "steelblue",
-      alpha = 0.5,
-      adjust = adjust
-    ) +
-    # red dashed mean line
-    geom_vline(
-      xintercept = mean_val,
-      color      = "red",
-      linetype   = "dashed",
-      size       = 1
-    ) +
-    # annotation for mean & SD just above the curve
-    annotate(
-      "text",
-      x     = mean_val,
-      y     = Inf,
-      label = paste0("M = ", round(mean_val, 1),
-                     "; SD = ", round(sd_val, 1)),
-      vjust = 2,
-      hjust = 0.5,
-      color = "black"
-    ) +
-    labs(
-      title = label,
-      x     = label,
-      y     = "Density"
-    ) +
-    theme_minimal()
-}
 ```
 
-```{r, include = F}
+```{r table function, include=F}
 # Table Function
 
 summarize_question_by_state <- function(df, state_var, response_var, title) {
@@ -484,11 +467,12 @@ summarize_question_by_state <- function(df, state_var, response_var, title) {
   
   # 5) Rank the responses by Total count
   result <- result %>%
-    mutate(
-      Total_count = as.integer(str_extract(Total, "^[0-9]+"))
-    ) %>%
-    arrange(desc(Total_count)) %>%
-    select(-Total_count)
+  mutate(
+    Total_count = as.integer(str_extract(Total, "^[0-9]+")),
+    is_missing  = response == "Missing"
+  ) %>%
+  arrange(desc(!is_missing), desc(Total_count)) %>%  # Prioritize non-missing, then missing, then count
+  select(-Total_count, -is_missing)
   
   # 6) Build the Grand Total row (including Missing in state counts)
   totals_by_state <- df2 %>%
@@ -521,82 +505,710 @@ summarize_question_by_state <- function(df, state_var, response_var, title) {
     
 }
 
-```
 
-# Summary Tables (Total and By State)
-
-```{r tables_by_state, echo=FALSE, results='asis'}
-
-# 1) Which variables to loop over
-vars_to_summarize <- setdiff(
-  names(dat_s),
-  c("date", "phn_nmbr", "age", "mthr_age", "birth_date", "month_baby", "weight", "help_mthr")
-)
-
-# 2) Loop and print one table per question
-for(var in vars_to_summarize) {
-  # grab the question text
-  title <- var_labels[[var]]
+summarize_question <- function(df, var) {
+  # Ensure the variable is a symbol
+  var <- rlang::ensym(var)
   
-  # build the table
-  tbl <- summarize_question_by_state(dat_s, "state", var, title)
+  # Count values and calculate percentage
+  summary_tbl <- df %>%
+    dplyr::count(!!var) %>%
+    dplyr::mutate(
+      percent = n / sum(n),
+      formatted = paste0(n, " (", sprintf("%.1f%%", percent * 100), ")")
+    ) %>%
+    dplyr::select(!!var, formatted)
   
-  # print a Markdown header so it shows up in both HTML & Word TOC
-  cat("## ", title, "\n\n")
+  # Add Total row
+  total_n <- sum(df %>% dplyr::count(!!var) %>% dplyr::pull(n))
+  total_row <- tibble::tibble(
+    !!var := "Total",
+    formatted = paste0(total_n, " (100.0%)")
+  )
   
-  if (knitr::pandoc_to() == "docx") {
-    # Word output: use pandoc table
-    print(
-      kable(
-        tbl,
-        format  = "pandoc",
-        caption = title
+  # Combine
+  final_tbl <- dplyr::bind_rows(summary_tbl, total_row)
+  
+  return(final_tbl)
+}
+
+summary_cont_question <- function(df, state_var, response_var, digits = 2) {
+  df %>%
+    # 1) group by the column whose name is in `state_var`
+    group_by_at(vars(all_of(state_var))) %>%
+    # 2) compute mean & SD of the column named in `response_var`
+    summarise(
+      mean_val = mean(.data[[response_var]], na.rm = TRUE),
+      sd_val   = sd(.data[[response_var]],   na.rm = TRUE),
+      .groups  = "drop"
+    ) %>%
+    # 3) glue them into "M = xx (SD = xx)"
+    mutate(
+      summary = sprintf(
+        paste0("M = %.", digits, "f (SD = %.", digits, "f)"),
+        mean_val, sd_val
       )
+    ) %>%
+    # 4) keep only the grouping column + our formatted summary
+    select(all_of(state_var), summary) %>%
+    # 5) pivot so each state becomes its own column
+    pivot_wider(
+      names_from  = all_of(state_var),
+      values_from = "summary"
     )
-  } else {
-    # HTML/PDF: styled striped table
-    print(
-      kable(
-        tbl,
-        format     = "html",
-        table.attr = "class='table table-striped'",
-        align      = rep("l", ncol(tbl))
+}
+
+summary_multiselect_by_state <- function(df, state_var, vars, title, digits = 1) {
+  tbl <- df %>%
+    # 1) Per‐state respondent count and per‐var 1‐counts
+    group_by(across(all_of(state_var))) %>%
+    summarise(
+      n_resp = n(),
+      across(
+        all_of(vars),
+        ~ sum(. == "Yes", na.rm = TRUE),
+        .names = "count_{.col}"
+      ),
+      .groups = "drop"
+    ) %>%
+    
+    # 2) Pivot to long so we can compute percentages
+    pivot_longer(
+      cols      = starts_with("count_"),
+      names_to  = "name",
+      values_to = "count",
+      names_prefix = "count_"
+    ) %>%
+    
+    # 3) % within each state
+    mutate(
+      percent = count / n_resp * 100,
+      summary = sprintf(
+        paste0("%d (%.", digits, "f%%)"),
+        count, percent
       )
-    )
-  }
+    ) %>%
+    
+    # 4) Drop intermediate columns and spread back out
+    select(-count, -n_resp, -percent) %>%
+    pivot_wider(
+      names_from  = all_of(state_var),
+      values_from = summary
+    ) %>%
+    
+    # 5) Attach your label lookup and reorder
+    left_join(var_labels_df, by = "name") %>%
+    select(description, everything(), -name)
+  
+  # 6) Rename the first column
+  names(tbl)[1] <- title
+  tbl
+}
+
+print_tab <- function(tbl){
+  
+    if (!is.null(knitr::pandoc_to()) && knitr::pandoc_to() == "docx") {
+      # Word output: use pandoc table
+      print(
+        kable(
+          tbl,
+          format  = "pandoc",
+          caption = title
+        )
+      )
+    } else {
+      # HTML/PDF/Console: styled striped table
+      print(
+        kable(
+          tbl,
+          format     = "html",
+          table.attr = "class='table table-striped'",
+          align      = rep("l", ncol(tbl))
+        )
+      )
+    }
   
   # small gap before the next one
+  cat("\n\n")
+  
+}
+```
+
+```{r figure function, include=F}
+plot_hist <- function(df, var, label, binwidth = 1) {
+  vals     <- df[[var]]
+  n_total  <- sum(!is.na(vals))
+  mean_val <- mean(vals, na.rm = TRUE)
+  sd_val   <- sd(vals, na.rm = TRUE)
+
+  # get max count for padding
+  h <- hist(
+    vals,
+    breaks = seq(
+      min(vals, na.rm = TRUE) - 0.5,
+      max(vals, na.rm = TRUE) + 0.5,
+      by = binwidth
+    ),
+    plot = FALSE
+  )
+  y_max <- max(h$counts)
+
+  ggplot(df, aes(x = .data[[var]])) +
+    # counts histogram
+    geom_histogram(
+      aes(y = after_stat(count)),
+      binwidth = binwidth,
+      fill     = "steelblue",
+      alpha    = 0.6,
+      color    = "white"
+    ) +
+    # density curve scaled to counts
+    geom_density(
+      aes(y = after_stat(density * n_total * binwidth)),
+      color = "darkblue",
+      size  = 1
+    ) +
+    # red mean line
+    geom_vline(
+      xintercept = mean_val,
+      color      = "red",
+      linetype   = "dashed",
+      size       = 1
+    ) +
+    # annotate mean & SD
+    annotate(
+      "text",
+      x     = mean_val,
+      y     = y_max * 1.05,
+      label = paste0("M = ", round(mean_val, 1), 
+                     "; SD = ", round(sd_val, 1)),
+      hjust = 0.5,
+      vjust = 0
+    ) +
+    # pad y‐axis for text
+    scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+    labs(
+      title = label,
+      x     = label,
+      y     = "Count"
+    ) +
+    theme_minimal()
+}
+
+plot_density <- function(df, var, label, adjust = 1) {
+  vals     <- df[[var]]
+  mean_val <- mean(vals, na.rm = TRUE)
+  sd_val   <- sd(vals, na.rm = TRUE)
+
+  ggplot(df, aes(x = .data[[var]])) + 
+    # smooth density curve
+    geom_density(
+      color  = "darkblue",
+      fill   = "steelblue",
+      alpha  = 0.5,
+      adjust = adjust
+    ) +
+    # red dashed mean line
+    geom_vline(
+      xintercept = mean_val,
+      color      = "red",
+      linetype   = "dashed",
+      size       = 1
+    ) +
+    # annotation for mean & SD just above the curve
+    annotate(
+      "text",
+      x     = mean_val,
+      y     = Inf,
+      label = paste0("M = ", round(mean_val, 1),
+                     "; SD = ", round(sd_val, 1)),
+      vjust = 2,
+      hjust = 0.5,
+      color = "black"
+    ) +
+    labs(
+      title = label,
+      x     = label,
+      y     = "Density"
+    ) +
+    theme_minimal()
+}
+
+```
+
+# 1. Summary Tables for Demographic Questions
+
+```{r state}
+response_var = "state"
+title = var_labels[response_var]
+    
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question(dat_s, "state")
+names(tbl) <- c("State", "Count (Percentage)")  
+
+print_tab(tbl)
+```
+
+```{r relation}
+response_var = "relation"
+title = var_labels[response_var]
+
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r age}
+response_var = "age_mother"
+title = var_labels[response_var]
+    
+cat("### ", title, "\n\n")
+
+tbl <- summary_cont_question(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var)
+
+print_tab(tbl)
+```
+
+```{r type_del}
+response_var = "type_del"
+title = var_labels[response_var]
+
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r sex_baby}
+response_var = "sex_baby"
+title = var_labels[response_var]
+
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r first_baby}
+response_var = "first_baby_mother"
+title = var_labels[response_var]
+
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r weight}
+response_var = "weight"
+title = var_labels[response_var]
+    
+cat("### ", title, "\n\n")
+
+tbl <- summary_cont_question(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var)
+
+print_tab(tbl)
+```
+
+```{r highest_qual_mother}
+response_var = "highest_qual_mother"
+title = var_labels[response_var]
+
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s |> filter(relation == "Mother"), 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r highest_qual}
+response_var = "highest_qual"
+title = var_labels[response_var]
+
+cat("### ", title, "(answered by respondents who are not the mother)", "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s |> filter(relation != "Mother"), 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r occupation_mother}
+response_var = "occupation_mother"
+title = var_labels[response_var]
+
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s |> filter(relation == "Mother"), 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r occupation_cgr}
+response_var = "occupation_cgr"
+title = var_labels[response_var]
+
+cat("### ", title, "(answered by respondents who are not the mother)", "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s |> filter(relation != "Mother"), 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r category}
+response_var = "category"
+title = var_labels[response_var]
+
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r bpl}
+response_var = "bpl"
+title = var_labels[response_var]
+
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r help_mthr}
+response_var = "help_mthr"
+title = var_labels[response_var]
+    
+cat("### ", title, "\n\n")
+
+tbl <- summary_cont_question(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var)
+
+print_tab(tbl)
+```
+
+```{r religion}
+response_var = "religion"
+title = var_labels[response_var]
+
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+# 2. Summary Tables for Health Practices
+
+```{r kmc_perform}
+response_var = "kmc_perform"
+title = var_labels[response_var]
+
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r kmc_perform_othr}
+response_var = "kmc_perform_othr"
+title = var_labels[response_var]
+
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r kmc_who}
+response_var = grep("^kmc_who_", names(dat_s), value = TRUE)
+title = "Who did this care?"
+
+cat("### ", title, "(among those who answer yes to the previous question)", "\n\n")
+
+tbl <- summary_multiselect_by_state(
+  df = dat_s |> filter(kmc_perform == "Yes"), 
+  state_var = "state", 
+  vars = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r cord}
+response_var = "cord"
+title = var_labels[response_var]
+
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r cord_apply}
+response_var = grep("^cord_apply_", names(dat_s), value = TRUE)
+title = "What did you put on the baby’s cord?"
+
+cat("### ", title, "\n\n")
+
+tbl <- summary_multiselect_by_state(
+  df = dat_s, 
+  state_var = "state", 
+  vars = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r diet_mother}
+response_var = "diet_mother"
+title = var_labels[response_var]
+
+cat("### ", title, "\n\n")
+
+tbl <- summarize_question_by_state(
+  df = dat_s, 
+  state_var = "state", 
+  response_var = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r reduce_diet}
+response_var = grep("^reduce_diet", names(dat_s), value = TRUE)
+title = "What did you reduce or eliminate in the diet?"
+
+cat("### ", title, "\n\n")
+
+tbl <- summary_multiselect_by_state(
+  df = dat_s, 
+  state_var = "state", 
+  vars = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+# 3. Summary Tables for Norms Questions
+
+```{r norms}
+# 1) build a character vector of your vars:
+response_vars <- names(dat_s |> select(physcl_benefit:family_kmc))
+
+# 2) loop:
+for (response_var in response_vars) {
+  
+  # pull the human‐readable title from your var_labels vector
+  title <- var_labels[response_var]
+  
+  # print a section header
+  cat("### ", title, "\n\n")
+  
+  # run your summary function
+  tbl <- summarize_question_by_state(
+    df           = dat_s,
+    state_var    = "state",
+    response_var = response_var,
+    title        = title
+  )
+  
+  # print the result
+  print_tab(tbl)
+  
+  # optional line‐break between tables
   cat("\n\n")
 }
 
 ```
 
-# Summary Plots (Total)
+# 4. Summary Tables for Barriers Questions
 
-```{r, print_all_plots, fig.width=6, fig.height=4, echo=FALSE, warning=FALSE}
-# generate plots in bulk
-plots <- imap(
-  dat_s[setdiff(names(dat_s), c("date","phn_nmbr","birth_date"))],
-  ~ {
-    lbl <- var_labels[[.y]]
-    if (grepl("^kmc_who_|^cord_apply_", .y)) {
-      plot_bar_dummy(dat_s, .y, lbl)
-    } else if (.y == "weight") {
-      # only weight gets the smooth density + M/SD
-      plot_density(dat_s, .y, lbl)
-    } else if (is.numeric(dat_s[[.y]])) {
-      # all other numerics get the histogram + density‐scaled overlay + mean/SD
-      plot_hist(dat_s, .y, lbl)
-    } else {
-      plot_bar_cat(dat_s, .y, lbl)
-    }
-  }
-)
+```{r, include = F}
+dat_s_short <- dat_s |> filter(formdef_version %in% c("2505202343", "2505202344"))
+```
 
-for (nm in names(plots)) {
- # grab the plot, update its title from var_labels (if not already set)
- p <- plots[[nm]] +
-      labs(title = var_labels[nm])
- print(p)
+```{r barriers}
+# 1) build a character vector of your vars:
+response_vars <- names(dat_s_short |>
+                                  select(risk:drink, 
+                                         -variety_mthr, diet_mother, 
+                                         variety_mother, optimise_mother) 
+                       )
+
+# 2) loop:
+for (response_var in response_vars) {
+  
+  # pull the human‐readable title from your var_labels vector
+  title <- var_labels[response_var]
+  
+  # print a section header
+  cat("### ", title, "\n\n")
+  
+  # run your summary function
+  tbl <- summarize_question_by_state(
+    df           = dat_s_short,
+    state_var    = "state",
+    response_var = response_var,
+    title        = title
+  )
+  
+  # print the result
+  print_tab(tbl)
+  
+  # optional line‐break between tables
+  cat("\n\n")
 }
+
+```
+
+```{r kmc_prac_hard}
+response_var = grep("^kmc_prac_hard_", names(dat_s_short), value = TRUE)
+title = "What do you think makes it hard for families to practice KMC at home?"
+
+cat("### ", title, "\n\n")
+
+tbl <- summary_multiselect_by_state(
+  df = dat_s_short, 
+  state_var = "state", 
+  vars = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+**While many people selected "Other", most of them answered "No Problem."**
+
+```{r kmc_prac_othr}
+tbl <- as.data.frame(unique(dat_s_short$kmc_prac_othr))
+title <- "Please tell us briefly what else makes it hard to do KMC."
+names(tbl) <- title
+
+cat("### ", title, "\n\n")
+
+print_tab(tbl)
+```
+
+```{r cord_hard}
+response_var = grep("^cord_hard_", names(dat_s_short), value = TRUE)
+title = "What do you think makes it hard for families to follow dry cord care at home?"
+
+cat("### ", title, "\n\n")
+
+tbl <- summary_multiselect_by_state(
+  df = dat_s_short, 
+  state_var = "state", 
+  vars = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r cord_hard_othr}
+tbl <- as.data.frame(unique(dat_s_short$cord_hard_othr))
+title <- "Please tell us briefly what else makes it hard to do dry cord care."
+names(tbl) <- title
+
+cat("### ", title, "\n\n")
+
+print_tab(tbl)
+```
+
+```{r hard_diet}
+response_var = grep("^hard_diet_", names(dat_s_short), value = TRUE)
+title = "What do you think makes it hard for mothers to eat a full and balanced diet after delivery?"
+
+cat("### ", title, "\n\n")
+
+tbl <- summary_multiselect_by_state(
+  df = dat_s_short, 
+  state_var = "state", 
+  vars = response_var, 
+  title = title)
+
+print_tab(tbl)
+```
+
+```{r hard_diet_othr}
+tbl <- as.data.frame(unique(dat_s_short$hard_diet_othr))
+title <- "Please tell us briefly what else makes it hard for mothers to eat a healthy diet."
+names(tbl) <- title
+
+cat("### ", title, "\n\n")
+
+print_tab(tbl)
 ```
