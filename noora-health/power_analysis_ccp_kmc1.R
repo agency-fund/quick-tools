@@ -1,3 +1,4 @@
+library(tidyverse)
 #==========================================
 # One-Step Cluster Crossover Design Power Calculator
 #  (2w control → 2w washout → 2w intervention, simutaneously happening within all selected hospitals)
@@ -69,6 +70,10 @@ cluster_power <- function(
 }
 
 
+
+# 1. For Study 1 (Norms Intervention vs. Default CCP) ---------------------
+
+
 #===========================
 # Single power estimate
 #===========================
@@ -99,7 +104,7 @@ print(res$power)
 # Set parameters & build grid of scenarios
 p1              <- 0.081
 clusters_vec    <- 2:8         # 2 through 8 hospitals
-deltas          <- seq(0.05, 0.20, by = 0.05)  # +10pp to +30pp
+deltas          <- seq(0.05, 0.20, by = 0.05)  # +5pp to +20pp
 
 # create data frame of all combinations
 df <- expand.grid(
@@ -141,9 +146,88 @@ ggplot(df, aes(x = clusters, y = power, color = factor(delta))) +
   labs(
     x        = "Number of Hospitals (Clusters)",
     y        = "Estimated Power",
-    title    = "Power vs. # of Karnataka Hospitals for Various Effect Sizes",
-    subtitle = "2w control → 2w washout → 2w intervention\n(Baseline KMC practice rate = 8.1%, ICC = 0.02, births/week = 32)"
+    title    = "Study 1: Power vs. # of Karnataka Hospitals for Various Effect Sizes",
+    subtitle = "2w control → 2w washout → 2w norms\n(Baseline KMC practice rate = 8.1%, ICC = 0.02, births/week = 32)"
   ) +
   ylim(0, 1) +
   theme_minimal(base_size = 14) +
   theme(legend.position = "bottom")
+
+
+# 2. For Study 2 (Norms Intervention + RES Revision vs. Norms Intervention) ---------------------
+
+#===========================
+# Single power estimate
+#===========================
+
+res <- cluster_power(
+  p1               = 0.0675, # default RES sign-up rate in Karnataka in 2023
+  p2               = 0.1675, # 10% point expected increase due to the RES revision
+  clusters         = 8, # 8 hospitals in karnataka
+  births_per_week  = births_per_week_karnataka,
+  weeks_control      = 2,
+  weeks_washout      = 2,
+  weeks_intervention = 2,
+  icc                = 0.02,
+  alpha              = 0.05,
+  use_t              = TRUE
+)
+
+print(res$power)
+
+#===========================
+# Plot different scenarios
+#===========================
+
+# Set parameters & build grid of scenarios
+p1              <- 0.0675
+clusters_vec    <- 2:8         # 2 through 8 hospitals
+deltas          <- seq(0.05, 0.20, by = 0.05)  # +5pp to +20pp
+
+# create data frame of all combinations
+df <- expand.grid(
+  clusters = clusters_vec,
+  delta    = deltas
+)
+
+# Compute power for each row by calling sw_cluster_power()
+df$power <- mapply(
+  FUN = function(k, d) {
+    # call the existing function, extract the 'power' element
+    cluster_power(
+      p1                = p1,
+      p2                = p1 + d,
+      clusters          = k,
+      births_per_week   = births_per_week_karnataka,
+      weeks_control     = 2,
+      weeks_washout     = 2,
+      weeks_intervention= 2,
+      icc               = 0.02,
+      alpha             = 0.05,
+      use_t             = TRUE
+    )$power
+  },
+  df$clusters,
+  df$delta
+)
+
+# Plot with ggplot2
+ggplot(df, aes(x = clusters, y = power, color = factor(delta))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  scale_color_brewer(
+    palette = "Dark2",
+    name    = "Effect size\n(Δ pp)",
+    labels  = paste0("+", deltas * 100, "pp")
+  ) +
+  scale_x_continuous(breaks = clusters_vec) +
+  labs(
+    x        = "Number of Hospitals (Clusters)",
+    y        = "Estimated Power",
+    title    = "Study 2: Power vs. # of Karnataka Hospitals for Various Effect Sizes",
+    subtitle = "2w norms → 2w washout → 2w nomrs + RES\n(Baseline RES sign-up rate = 6.75%, ICC = 0.02, births/week = 32)"
+  ) +
+  ylim(0, 1) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
+

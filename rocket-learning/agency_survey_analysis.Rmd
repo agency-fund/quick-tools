@@ -1,0 +1,539 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  dev  = "png",   
+  dpi  = 300,     
+  fig.width = 6,  
+  fig.height = 4, 
+  echo=FALSE,
+  results='asis'
+  )
+
+library(tidyverse)
+library(lubridate)
+library(googlesheets4)
+```
+
+```{r load google data, include=F}
+# load data
+sheet_url <- list(
+  sheet1 = "https://docs.google.com/spreadsheets/d/11ATETfUk-7PeWwnUmQXv0b3VvThCMr-vEHxHh2ooNU0/edit?gid=2109074663#gid=2109074663",
+  sheet2 = "https://docs.google.com/spreadsheets/d/1ukEReSvXKkTDmn1PDB-IlccH5zIv-DMdEnzQItl1rHs/edit?gid=540181426#gid=540181426",
+  sheet3 = "https://docs.google.com/spreadsheets/d/18CSdWHxEmi7WWGST-49dxUu7HZAyolOStX4M1jEguaM/edit?gid=1328427351#gid=1328427351",
+  sheet4 = "https://docs.google.com/spreadsheets/d/1px_KfFO6GoQ1dPixGRtF3Jb1C8Q_YyItb0Xk0OiplGo/edit?gid=705760693#gid=705760693",
+  sheet5 = "https://docs.google.com/spreadsheets/d/1ID9mwX6g9jkoEroO6OD8_xG21ZomyjYQoKEKu_MiBYg/edit?gid=728639335#gid=728639335",
+  sheet_demo = "https://docs.google.com/spreadsheets/d/1h3gthjO3HOG68e5g_ppyG5foW5Nx8kM2Wh2mQ2b0wkQ/edit?gid=1114476976#gid=1114476976",
+  sheet_engage = "https://docs.google.com/spreadsheets/d/1nMMt_Gk2ohR2Q517xri3A6-7Ahhzqtei81oNEAXOrFk/edit?gid=79792842#gid=79792842"
+  )
+
+# sapply(sheet_url, sheet_names)
+
+# read data
+dat1 <- read_sheet(sheet_url$sheet1, sheet = "Sheet1")
+dat2 <- read_sheet(sheet_url$sheet2, sheet = "Sheet1")
+dat3 <- read_sheet(sheet_url$sheet3, sheet = "Sheet1")
+dat4 <- read_sheet(sheet_url$sheet4, sheet = "Sheet1")
+dat5 <- read_sheet(sheet_url$sheet5, sheet = "Sheet1")
+
+dat_demo1 <- read_sheet(sheet_url$sheet_demo, sheet = "Amethi")
+dat_demo2 <- read_sheet(sheet_url$sheet_demo, sheet = "Latur")
+
+dat_engage <- read_sheet(sheet_url$sheet_engage, sheet = "Sheet1")
+```
+
+```{r data cleaning, include=FALSE}
+# survey 1
+dat1_s <- dat1 |> rename(
+  s1_q0 = `0`,
+  s1_q1 = `1`,
+  s1_q2 = `2`,
+  s1_q3 = `3`,
+  s1_q4 = `4`,
+  s1_q5 = `5`,
+  s1_q6 = `6`
+) 
+
+dat1_s <- dat1_s %>%
+  mutate(language = case_when(
+      s1_q0 == "सर्वे शुरू करते हैं!" ~ "Hindi",
+      s1_q0 == "सर्वेक्षण सुरू करा!" ~ "Marathi",
+      TRUE ~ NA_character_
+    )) |> 
+  mutate(
+    # Q1: Options 1–4 in Hindi/Marathi
+    s1_q1 = case_when(
+      str_detect(s1_q1, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s1_q1, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s1_q1, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+    
+    # Q2: Options 1–3 in Hindi/Marathi
+    s1_q2 = case_when(
+      str_detect(s1_q2, "विकल्प 1|पर्याय १") ~ 1,
+      str_detect(s1_q2, "विकल्प 2|पर्याय २") ~ 2,
+      str_detect(s1_q2, "विकल्प 3|पर्याय ३") ~ 3,
+      TRUE ~ NA_real_
+    ),
+    
+    # Q3: Frequency scale – 1 (Never) to 3 (Often)
+    s1_q3 = case_when(
+      str_detect(s1_q3, "कभी नहीं|अजिबात नाही") ~ 1,
+      str_detect(s1_q3, "एक या दो बार|एक किंवा दोन वेळा") ~ 2,
+      str_detect(s1_q3, "तीन बार या उससे ज़्यादा|तीन वेळा किंवा अधिक") ~ 3,
+      TRUE ~ NA_real_
+    ),
+    
+    # Q4: Options 1–3
+    s1_q4 = case_when(
+      str_detect(s1_q4, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s1_q4, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s1_q4, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+    
+    # Q5: Options 1–3
+    s1_q5 = case_when(
+      str_detect(s1_q5, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s1_q5, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s1_q5, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+    
+    # Q6: Frequency scale – 1 (Never) to 3 (Often)
+    s1_q6 = case_when(
+      str_detect(s1_q6, "कभी नहीं|अजिबात नाही") ~ 1,
+      str_detect(s1_q6, "एक या दो बार|एक किंवा दोन वेळा") ~ 2,
+      str_detect(s1_q6, "तीन बार या उससे ज़्यादा|तीन वेळा किंवा") ~ 3,
+      TRUE ~ NA_real_
+    )
+  ) |> 
+    select(customer_external_id, language, s1_q1:s1_q6)
+
+# survey 2
+dat2_s <- dat2 |> rename(
+  s2_q0 = `0`,
+  s2_q1 = `1`,
+  s2_q2 = `2`,
+  s2_q3 = `3`,
+  s2_q4 = `4`,
+  s2_q5 = `5`,
+  s2_q6 = `6`
+) 
+
+dat2_s <- dat2_s %>%
+  mutate(
+    # Recode survey language from intro
+    language = case_when(
+      s2_q0 == "शुरू करते हैं!" ~ "Hindi",
+      s2_q0 == "सर्वेक्षण सुरू करा!" ~ "Marathi",
+      TRUE ~ NA_character_
+    ),
+
+    # Q1: Options (1–3)
+    s2_q1 = case_when(
+      str_detect(s2_q1, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s2_q1, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s2_q1, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q2: Frequency (1 = never, 3 = often)
+    s2_q2 = case_when(
+      str_detect(s2_q2, "कभी नहीं|अजिबात नाही") ~ 1,
+      str_detect(s2_q2, "एक या दो बार|एक किंवा दोन वेळा") ~ 2,
+      str_detect(s2_q2, "तीन बार या ज़्यादा|तीन वेळा") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q3: Options (1–3)
+    s2_q3 = case_when(
+      str_detect(s2_q3, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s2_q3, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s2_q3, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q4: Frequency (1 = never, 3 = often)
+    s2_q4 = case_when(
+      str_detect(s2_q4, "कभी नहीं|अजिबात नाही") ~ 1,
+      str_detect(s2_q4, "एक या दो बार|एक किंवा दोन वेळा") ~ 2,
+      str_detect(s2_q4, "तीन बार या ज़्यादा|तीन वेळा") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q5: Options (1–3)
+    s2_q5 = case_when(
+      str_detect(s2_q5, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s2_q5, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s2_q5, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q6: Options (1–4)
+    s2_q6 = case_when(
+      str_detect(s2_q6, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s2_q6, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s2_q6, "विकल्प 3|पर्याय 3") ~ 3,
+      str_detect(s2_q6, "विकल्प 4|पर्याय 4") ~ 4,
+      TRUE ~ NA_real_
+    )
+  ) |> 
+    select(customer_external_id, language, s2_q1:s2_q6)
+
+
+# survey 3
+dat3_s <- dat3 |> rename(
+  s3_q0 = `0`,
+  s3_q1 = `1`,
+  s3_q2 = `2`,
+  s3_q3 = `3`,
+  s3_q4 = `4`,
+  s3_q5 = `5`,
+  s3_q6 = `6`
+) 
+
+dat3_s <- dat3_s |>
+  mutate(
+    # Language
+    language = case_when(
+      s3_q0 == "शुरू करते हैं!" ~ "Hindi",
+      s3_q0 == "सर्वेक्षण सुरू करा!" ~ "Marathi",
+      TRUE ~ NA_character_
+    ),
+
+    # Q1: Option-style
+    s3_q1 = case_when(
+      str_detect(s3_q1, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s3_q1, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s3_q1, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q2: Frequency
+    s3_q2 = case_when(
+      str_detect(s3_q2, "कभी नहीं|कोणाशीही नाही") ~ 1,
+      str_detect(s3_q2, "एक या दो बार|एक किंवा दोन") ~ 2,
+      str_detect(s3_q2, "तीन बार या ज़्यादा|तीन किंवा अधिक") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q3: Option-style
+    s3_q3 = case_when(
+      str_detect(s3_q3, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s3_q3, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s3_q3, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q4: Frequency
+    s3_q4 = case_when(
+      str_detect(s3_q4, "कभी नहीं|कधीच नाही") ~ 1,
+      str_detect(s3_q4, "एक या दो बार|एक किंवा दोन") ~ 2,
+      str_detect(s3_q4, "तीन बार या ज़्यादा|तीन वेळा किंवा अधिक") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q5: Option-style
+    s3_q5 = case_when(
+      str_detect(s3_q5, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s3_q5, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s3_q5, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q6: Option-style
+    s3_q6 = case_when(
+      str_detect(s3_q6, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s3_q6, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s3_q6, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    )
+  ) |> 
+    select(customer_external_id, language, s3_q1:s3_q6)
+
+
+# survey 4
+dat4_s <- dat4 |> rename(
+  s4_q0 = `0`,
+  s4_q1 = `1`,
+  s4_q2 = `2`,
+  s4_q3 = `3`,
+  s4_q4 = `4`,
+  s4_q5 = `5`
+) 
+
+dat4_s <- dat4_s |> 
+  mutate(
+    # Recode survey intro to language
+    language = case_when(
+      s4_q0 == "शुरू करते हैं!" ~ "Hindi",
+      s4_q0 == "सर्वेक्षण सुरू करा!" ~ "Marathi",
+      TRUE ~ NA_character_
+    ),
+
+    # Q1: Options (1–4)
+    s4_q1 = case_when(
+      str_detect(s4_q1, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s4_q1, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s4_q1, "विकल्प 3|पर्याय 3") ~ 3,
+      str_detect(s4_q1, "विकल्प 4|पर्याय 4") ~ 4,
+      TRUE ~ NA_real_
+    ),
+
+    # Q2: Options (1–3)
+    s4_q2 = case_when(
+      str_detect(s4_q2, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s4_q2, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s4_q2, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q3: Options (1–3)
+    s4_q3 = case_when(
+      str_detect(s4_q3, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s4_q3, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s4_q3, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q4: Options (1–3)
+    s4_q4 = case_when(
+      str_detect(s4_q4, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s4_q4, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s4_q4, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q5: Options (1–3)
+    s4_q5 = case_when(
+      str_detect(s4_q5, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s4_q5, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s4_q5, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    )
+  ) |> 
+    select(customer_external_id, language, s4_q1:s4_q5)
+
+
+# survey 5
+dat5_s <- dat5 |> rename(
+  s5_q0 = `0`,
+  s5_q1 = `1`,
+  s5_q2 = `2`,
+  s5_q3 = `3`,
+  s5_q4 = `4`,
+  s5_q5 = `5`
+)
+
+dat5_s <- dat5_s %>%
+  mutate(
+    # Language recoding
+    language = case_when(
+      s5_q0 == "शुरू करते हैं!" ~ "Hindi",
+      s5_q0 == "सर्वेक्षण सुरू करा!" ~ "Marathi",
+      TRUE ~ NA_character_
+    ),
+
+    # Q1: Options 1–3
+    s5_q1 = case_when(
+      str_detect(s5_q1, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s5_q1, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s5_q1, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q2: Options 1–3
+    s5_q2 = case_when(
+      str_detect(s5_q2, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s5_q2, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s5_q2, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q3: Options 1–3
+    s5_q3 = case_when(
+      str_detect(s5_q3, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s5_q3, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s5_q3, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q4: Options 1–3
+    s5_q4 = case_when(
+      str_detect(s5_q4, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s5_q4, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s5_q4, "विकल्प 3|पर्याय 3") ~ 3,
+      TRUE ~ NA_real_
+    ),
+
+    # Q5: Options 1–5
+    s5_q5 = case_when(
+      str_detect(s5_q5, "विकल्प 1|पर्याय 1") ~ 1,
+      str_detect(s5_q5, "विकल्प 2|पर्याय 2") ~ 2,
+      str_detect(s5_q5, "विकल्प 3|पर्याय 3") ~ 3,
+      str_detect(s5_q5, "विकल्प 4|पर्याय 4") ~ 4,
+      str_detect(s5_q5, "विकल्प 5|पर्याय 5") ~ 5,
+      TRUE ~ NA_real_
+    )
+  ) |> 
+    select(customer_external_id, language, s5_q1:s5_q5)
+```
+
+```{r}
+library(dplyr)
+library(stringr)
+
+# Detect language
+# detect_language <- function(text) {
+#   case_when(
+#     text %in% c("सर्वे शुरू करते हैं!", "शुरू करते हैं!") ~ "Hindi",
+#     text == "सर्वेक्षण सुरू करा!" ~ "Marathi",
+#     TRUE ~ NA_character_
+#   )
+# }
+
+# Recode for option-style responses
+recode_option <- function(x, max_option = 3) {
+  case_when(
+    str_detect(x, "विकल्प 1|पर्याय 1") ~ 1,
+    str_detect(x, "विकल्प 2|पर्याय 2") ~ 2,
+    str_detect(x, "विकल्प 3|पर्याय 3") ~ 3,
+    max_option >= 4 & str_detect(x, "विकल्प 4|पर्याय 4") ~ 4,
+    max_option >= 5 & str_detect(x, "विकल्प 5|पर्याय 5") ~ 5,
+    TRUE ~ NA_real_
+  )
+}
+
+# Recode for frequency-style responses
+recode_frequency <- function(x) {
+  case_when(
+    str_detect(x, "कभी नहीं|अजिबात नाही|कोणाशीही नाही|कधीच नाही") ~ 1,
+    str_detect(x, "एक या दो बार|एक किंवा दोन वेळा|एक किंवा दोन") ~ 2,
+    str_detect(x, "तीन बार या ज़्यादा|तीन वेळा|तीन वेळा किंवा अधिक|तीन वेळा किंवा") ~ 3,
+    TRUE ~ NA_real_
+  )
+}
+
+# Generalized survey cleaner
+clean_survey <- function(df, prefix, question_types, max_options = list()) {
+  df <- df %>%
+    rename_with(~ paste0(prefix, "_q", .x), matches("^[0-9]$")) #%>%
+    #mutate(language = detect_language(.data[[paste0(prefix, "_q0")]]))
+  
+  for (i in seq_along(question_types)) {
+    q_name <- paste0(prefix, "_q", i)
+    q_type <- question_types[i]
+    q_max  <- if (!is.null(max_options[[as.character(i)]])) max_options[[as.character(i)]] else 3
+    
+    df <- df %>%
+      mutate(!!sym(q_name) := if (q_type == "option") recode_option(.data[[q_name]], q_max) else recode_frequency(.data[[q_name]]))
+  }
+  
+  df %>% select(customer_external_id, 
+                #language, 
+                starts_with(prefix))
+}
+
+# dat1: All questions exist and are mostly "option" or "frequency"
+dat1_s <- clean_survey(dat1, "s1", c("option", "option", "frequency", "option", "option", "frequency"))
+
+# dat2: Mixed types with Q6 having 4 options
+dat2_s <- clean_survey(dat2, "s2", c("option", "frequency", "option", "frequency", "option", "option"), max_options = list("6" = 4))
+
+# dat3: Mostly standard
+dat3_s <- clean_survey(dat3, "s3", c("option", "frequency", "option", "frequency", "option", "option"))
+
+# dat4: Only 6 questions, all options (Q1 has 4)
+dat4_s <- clean_survey(dat4, "s4", c("option", "option", "option", "option", "option"), max_options = list("1" = 4))
+
+# dat5: Q5 has 5 options
+dat5_s <- clean_survey(dat5, "s5", c("option", "option", "option", "option", "option"), max_options = list("5" = 5))
+
+
+# merge all 5 datasets
+
+# Step 1: Create a list of all cleaned datasets
+data_list <- list(dat1_s, dat2_s, dat3_s, dat4_s, dat5_s)
+
+# Step 2: Full join all dataframes by "customer_external_id"
+merged_data <- reduce(data_list, full_join, by = "customer_external_id")
+
+# Step 3: Remove rows where all s#_q# columns are NA
+# Identify all question columns (i.e., those matching s#_q#)
+question_cols <- grep("^s\\d+_q(?!0)\\d+$", names(merged_data), value = TRUE, perl = TRUE)
+
+# Step 4: Filter out rows with all NA in those question columns
+merged_data_cleaned <- merged_data %>%
+  filter(rowSums(!is.na(select(., all_of(question_cols)))) > 0)
+
+dat <- merged_data_cleaned
+```
+
+## Plots and tables
+```{r}
+# First reshape to long format, ignoring the `_q0` columns
+dat_long <- dat %>%
+  pivot_longer(
+    cols = matches("^s[1-5]_q[1-6]$"),
+    names_to = c("survey", "question"),
+    names_pattern = "(s[1-5])_(q[1-6])",
+    values_to = "response"
+  ) %>%
+  filter(!is.na(response)) %>%
+  mutate(
+    response = as.numeric(response),
+    construct = case_when(
+      question %in% c("q1", "q2") ~ "Goal Setting",
+      question %in% c("q3", "q4") ~ "Navigation",
+      question %in% c("q5", "q6") ~ "Resilience"
+    ),
+    question_type = if_else(as.integer(str_sub(question, 2)) %% 2 == 1, "Extent", "Frequency")
+  )
+
+```
+
+```{r}
+# Summary table by survey and question
+summary_table <- dat_long %>%
+  group_by(survey, question, construct, question_type) %>%
+  summarise(
+    n = n(),
+    mean = mean(response, na.rm = TRUE),
+    sd = sd(response, na.rm = TRUE),
+    se = ifelse(n > 1, sd / sqrt(n), 0),
+    lower_ci = mean - 1.96 * se,
+    upper_ci = mean + 1.96 * se,
+    .groups = "drop"
+  )
+
+# Display table
+summary_table
+
+```
+
+```{r}
+ggplot(summary_table, aes(x = survey, y = mean, group = question, color = question)) +
+  geom_point(position = position_dodge(width = 0.3), size = 3) +
+  geom_errorbar(
+    aes(ymin = lower_ci, ymax = upper_ci),
+    width = 0.2, linewidth = 1,
+    position = position_dodge(width = 0.3)
+  ) +
+  facet_wrap(~construct + question_type, scales = "free_y") +
+  labs(
+    title = "Mean Response with 95% Confidence Intervals by Construct and Survey",
+    x = "Survey",
+    y = "Mean Response (1 = Low, Higher = Greater Extent/Frequency)",
+    color = "Question"
+  ) +
+  theme_minimal()
+
+
+
+```
+
