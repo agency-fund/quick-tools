@@ -98,8 +98,10 @@ cluster_before_after_power <- function(
 #==========================================
 
 # Average births per week across 8 Karnataka hospitals
-births_per_week_karnataka <- mean(c(259.78, 169.56, 145.44, 133.33,
-                                   125.00, 114.11, 102.99, 101.11)) / 31 * 7
+# births_per_week_karnataka <- mean(c(259.78, 169.56, 145.44, 133.33,
+#                                    125.00, 114.11, 102.99, 101.11)) / 31 * 7
+
+births_per_week_karnataka = round(220/15/8*7) # based on empirical data
 
 cat("Study 1: Social Norms Intervention for KMC Practice\n")
 cat("Design: Cluster before-after with washout\n")
@@ -159,8 +161,8 @@ print(icc_results, digits = 3)
 cat("\n")
 
 # 2. Different effect sizes and cluster numbers
-effect_sizes <- seq(0.05, 0.20, by = 0.025)  # 5pp to 20pp
-cluster_numbers <- 6:10
+effect_sizes <- seq(0.05, 0.20, by = 0.05)  # 5pp to 20pp
+cluster_numbers <- 2:8
 
 scenario_grid <- expand.grid(
   delta = effect_sizes,
@@ -221,8 +223,8 @@ power_plot <- ggplot(scenario_results, aes(x = clusters, y = power, color = fact
   labs(
     x = "Number of Hospitals (Clusters)",
     y = "Statistical Power",
-    title = "Study 1: Power for Cluster Before-After Design",
-    subtitle = "Social norms intervention for KMC practice\n(Baseline: 8.1%, ICC_within: 0.02, ICC_between: 0.01)"
+    title    = "Study 1: Power vs. # of Karnataka Hospitals for Various Effect Sizes",
+    subtitle = "2w control → 2w washout → 2w norms\n(Baseline KMC practice rate = 8.1%, ICC = 0.02, births/week = 13)"
   ) +
   ylim(0, 1) +
   theme_minimal(base_size = 12) +
@@ -247,3 +249,112 @@ cat("5. Analysis plan: Use mixed-effects models with:\n")
 cat("   - Hospital random effects\n")
 cat("   - Period fixed effects\n")
 cat("   - Robust standard errors\n")
+
+#===========================
+# Actual power with observed cluster sizes
+#===========================
+
+cat("\n")
+cat("ACTUAL POWER CALCULATION WITH OBSERVED CLUSTER SIZES:\n")
+cat("Hospital 2-week birth counts: 23, 26, 42, 40, 32, 40, 18, 10\n\n")
+
+# Observed births per 2-week period for each hospital
+observed_births_2weeks <- c(23, 26, 42, 40, 32, 40, 18, 10)
+observed_births_per_week <- observed_births_2weeks / 2
+
+# Function for unbalanced cluster design
+cluster_power_unbalanced <- function(
+    p1, p2, births_per_week_vector,
+    weeks_control = 2, weeks_intervention = 2,
+    icc_within = 0.02, icc_between = 0.01,
+    alpha = 0.05, use_t = TRUE
+) {
+  
+  clusters <- length(births_per_week_vector)
+  
+  # Cluster-period sizes for each hospital
+  m0_vec <- weeks_control * births_per_week_vector      # control period sizes
+  m1_vec <- weeks_intervention * births_per_week_vector # intervention period sizes
+  
+  # Outcome variance under null
+  sigma2 <- p1 * (1 - p1)
+  
+  # Variance calculation for each cluster
+  cluster_variances <- sapply(1:clusters, function(i) {
+    m0 <- m0_vec[i]
+    m1 <- m1_vec[i]
+    
+    # Design effects for this cluster
+    DE0 <- 1 + (m0 - 1) * icc_within
+    DE1 <- 1 + (m1 - 1) * icc_within
+    
+    # Variance of difference for this cluster
+    var_diff <- (sigma2 * DE0 / m0) + (sigma2 * DE1 / m1) - 
+                2 * sqrt((sigma2 * DE0 / m0) * (sigma2 * DE1 / m1)) * icc_between
+    
+    return(var_diff)
+  })
+  
+  # Overall variance (inverse variance weighting)
+  weights <- 1 / cluster_variances
+  total_weight <- sum(weights)
+  var_treatment_effect <- 1 / total_weight
+  se_beta <- sqrt(var_treatment_effect)
+  
+  # Critical value
+  if (use_t && clusters < 30) {
+    df <- clusters - 1
+    crit <- qt(1 - alpha/2, df = df)
+  } else {
+    crit <- qnorm(1 - alpha/2)
+  }
+  
+  # Power
+  delta <- abs(p2 - p1)
+  power <- pnorm(delta / se_beta - crit) + pnorm(-delta / se_beta - crit)
+  
+  list(
+    clusters = clusters,
+    births_per_week = births_per_week_vector,
+    total_births_2weeks = sum(observed_births_2weeks),
+    cluster_variances = cluster_variances,
+    weights = weights,
+    se_estimate = se_beta,
+    power = power,
+    effective_sample_size = total_weight
+  )
+}
+
+# Calculate power with observed cluster sizes
+actual_result <- cluster_power_unbalanced(
+  p1 = 0.081,
+  p2 = 0.181,
+  births_per_week_vector = observed_births_per_week,
+  weeks_control = 2,
+  weeks_intervention = 2,
+  icc_within = 0.02,
+  icc_between = 0.01
+)
+
+cat("Results with actual cluster sizes:\n")
+cat("Total births (2 weeks):", actual_result$total_births_2weeks, "\n")
+cat("Effective sample size:", round(actual_result$effective_sample_size, 1), "\n")
+cat("Standard error:", round(actual_result$se_estimate, 4), "\n")
+cat("Power:", round(actual_result$power, 3), "\n\n")
+
+cat("Comparison:\n")
+cat("Balanced design power (8 hospitals × 13/week):", round(primary_result$power, 3), "\n")
+cat("Unbalanced design power (actual sizes):", round(actual_result$power, 3), "\n")
+cat("Power reduction:", round((primary_result$power - actual_result$power) * 100, 1), "percentage points\n\n")
+
+# Show individual hospital contributions
+hospital_contributions <- data.frame(
+  Hospital = 1:8,
+  Births_2weeks = observed_births_2weeks,
+  Births_per_week = observed_births_per_week,
+  Weight = round(actual_result$weights, 2),
+  Contribution_pct = round(100 * actual_result$weights / sum(actual_result$weights), 1)
+)
+
+cat("Individual hospital contributions:\n")
+print(hospital_contributions, row.names = FALSE)
