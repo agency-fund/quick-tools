@@ -1,6 +1,6 @@
 ---
-title: "Chatbot Usage Analysis Report"
-author: "Chat Data Analysis"
+title: "ChatSEL x Enseña por Colombia - Text Analysis Report"
+author: "Zezhen Wu"
 date: today
 format:
   html:
@@ -38,7 +38,9 @@ color_negative <- "#E74C3C"
 
 # Overview
 
-This report analyzes user interactions with an AI chatbot, examining message patterns, sentiment, topics, and interaction dynamics. The data includes messages primarily in Spanish, with some in English.
+This report analyzes interactions from approximately **20 teachers (ECOs - Enseña Colaboradores)** using **ChatSEL**, a WhatsApp-based AI chatbot built by the Agency Fund. ChatSEL leverages the Social and Emotional Learning (SEL) content repository from **Enseña por Colombia** to support teachers in their classroom practice.
+
+The analysis examines message patterns, sentiment, topics, and interaction dynamics. Messages are primarily in Spanish, with some in English.
 
 ---
 
@@ -47,9 +49,9 @@ This report analyzes user interactions with an AI chatbot, examining message pat
 ## 1.1 General Summary
 
 ```{r user-summary}
-#| output: asis
 # Run the user message summary script
-suppressMessages(source("analysis/01_user_message_summary.R"))
+# Capture and suppress all console output
+invisible(capture.output(suppressMessages(source("analysis/01_user_message_summary.R"))))
 
 # Load results
 results_summary <- readRDS("analysis/user_message_summary.rds")
@@ -73,11 +75,84 @@ stats_df <- tibble(
     paste0(results_summary$summary_stats$median_length, " characters"),
     paste(format(results_summary$summary_stats$date_range[1]), "to",
           format(results_summary$summary_stats$date_range[2]))
+  ),
+  Interpretation = c(
+    "Total number of messages sent by teachers to ChatSEL",
+    "Number of distinct conversation threads initiated by teachers",
+    "Typical message length; suggests teachers provide context in their requests",
+    "Half of messages are shorter than this; indicates many brief, focused queries",
+    "Time span of data collection"
   )
 )
 
 kable(stats_df, caption = "User Message Statistics")
 ```
+
+### Example Conversations
+
+Below are real examples of teacher-AI interactions extracted from the dataset:
+
+```{r example-conversations}
+#| output: asis
+
+# Load raw messages
+messages_raw <- readRDS("data/messages_raw.rds")
+
+# Create translation lookup for specific conversation IDs
+# These are manually curated translations of actual conversations
+# Translations are matched by position (1st message -> 1st translation, etc.)
+translations <- list(
+  "134" = c(
+    "Hello",
+    "Hello — how can I help you today with SEL, a Connection activity, or adapting an activity? If you want me to suggest a new activity, tell me the grade level, duration, and which SEL competency you want to work on.",
+    "How to handle when a pair of students don't want to work together",
+    "Talk to both privately to hear their side and validate their feelings; make clear that respectful participation is mandatory and agree on a temporary solution that reduces friction, such as separate roles or parallel work. If it doesn't improve, facilitate a brief restorative conversation about impact and needs, communicate consequences and next steps, and consider mediation or rotating pairs in future activities."
+  ),
+  "133" = c(
+    "Lesson planning for socio-emotional education - plan an activity for me and give me the learning objectives and target audience",
+    "💡 I suggest 3 activities: • Attention to emotions, sensations and thoughts (15-20 min): Activity to differentiate between physical sensations, emotions and thoughts using stimuli... • Exploring the mind (30-40 min): Use of the 'mind jar' as a metaphor to explore emotions and mental clarity. • Color stickers (10-15 min): Visual activity to express how they feel about different aspects of their life. Do you want more details about any activity? If so, please write the name of the activity. If not, feel free to request more options.",
+    "Exploring the mind",
+    "\"Exploring the mind\" is a Self-Leadership (self-awareness and self-control) activity whose objective is for students to compare how their mind feels when they are agitated versus calm using the \"mind jar\" metaphor; estimated time 45-60 minutes. It is recommended to start with a brief centering exercise (Connect with your heart) and narrate the story \"Clear Mind-Unclear Mind\" while adding sand, stones and glitter to the jar to represent thoughts and emotions; the guide includes instructions and suggested script."
+  )
+)
+
+# Select specific conversations (using explicit IDs for consistency)
+example_convs <- c(134, 133)
+
+# Extract and format conversations
+for (i in seq_along(example_convs)) {
+  conv_id <- example_convs[i]
+
+  conv_messages <- messages_raw %>%
+    filter(conversation_id == conv_id) %>%
+    arrange(created_at) %>%
+    select(role, content) %>%
+    head(4)  # Show first 4 messages max
+
+  cat("\n::: {.callout-note icon=false}\n")
+  cat("## Example", i, "\n\n")
+
+  for (j in 1:nrow(conv_messages)) {
+    role_label <- ifelse(conv_messages$role[j] == "user", "Teacher (User)", "ChatSEL (AI)")
+    content <- conv_messages$content[j]
+
+    cat("**", role_label, ":**  \n", sep = "")
+    cat("*\"", content, "\"*  \n", sep = "")
+
+    # Add translation if available in lookup table
+    conv_id_str <- as.character(conv_id)
+    if (conv_id_str %in% names(translations) && j <= length(translations[[conv_id_str]])) {
+      translation <- translations[[conv_id_str]][j]
+      cat("_[", translation, "]_\n\n", sep = "")
+    } else {
+      cat("\n")
+    }
+  }
+
+  cat(":::\n")
+}
+```
+
 
 ## 1.2 Length Distribution
 
@@ -85,12 +160,20 @@ kable(stats_df, caption = "User Message Statistics")
 #| fig-cap: "Distribution of user message lengths (red line = median)"
 
 ggplot(user_messages, aes(x = msg_length)) +
-  geom_histogram(binwidth = 50, fill = color_user, alpha = 0.7, color = "white") +
+  geom_histogram(binwidth = 25, fill = color_user, alpha = 0.7, color = "white") +
   geom_vline(aes(xintercept = median(msg_length)),
              color = color_negative, linetype = "dashed", size = 1.2) +
+  annotate("text",
+           x = median(user_messages$msg_length) + 30,
+           y = Inf,
+           label = paste0("Median = ", median(user_messages$msg_length)),
+           vjust = 1.5,
+           color = color_negative,
+           size = 4) +
+  scale_x_continuous(limits = c(0, 600)) +
   labs(
     title = "User Message Length Distribution",
-    subtitle = "Spanish/English text",
+    subtitle = "99% of messages are under 353 characters",
     x = "Message Length (characters)",
     y = "Count"
   ) +
@@ -137,7 +220,25 @@ user_messages %>%
 
 # Part 2: Sentiment Analysis {.tabset}
 
-Messages were analyzed using a multilingual transformer model that detects sentiment in Spanish and English.
+## Understanding the Sentiment Model
+
+**What is being measured?**
+Messages were analyzed using the `nlptown/bert-base-multilingual-uncased-sentiment` model, which classifies text sentiment on a **5-star scale**:
+
+- **1 star**: Very negative (e.g., strong frustration, complaints, dissatisfaction)
+- **2 stars**: Negative (e.g., mild frustration, criticism)
+- **3 stars**: Neutral (e.g., factual statements, simple requests, informational)
+- **4 stars**: Positive (e.g., satisfied, appreciative tone)
+- **5 stars**: Very positive (e.g., enthusiastic, highly satisfied, grateful)
+
+**Model Confidence Score**: Each prediction includes a confidence score (0-1) indicating how certain the model is about its classification. Higher scores mean the model is more confident in the sentiment label.
+
+**Why analyze user vs AI sentiment separately?**
+Comparing sentiment patterns helps us understand:
+
+- **User sentiment**: What emotional tone do users bring to conversations? Are they frustrated, neutral, or positive?
+- **AI sentiment**: Does the AI maintain a consistent, professional tone? Is it appropriately empathetic?
+- **Interaction dynamics**: How do sentiment patterns differ between human queries and AI responses?
 
 ```{r check-sentiment-files}
 # Check if sentiment analysis has been run
@@ -169,9 +270,17 @@ sentiment_all <- read_csv("analysis/sentiment_all.csv", show_col_types = FALSE)
 
 ## 2.1 Sentiment: User vs AI
 
+**How to interpret this chart:**
+This comparison shows the distribution of sentiment scores for user messages versus AI responses. Key things to look for:
+
+- **Dominant sentiment**: Which star rating is most common for each role?
+- **Range of emotions**: Do users show more variation in sentiment (mix of 1-5 stars) or is it concentrated?
+- **AI consistency**: Does the AI maintain a stable, professional tone (concentrated in 3-5 stars)?
+- **Negative sentiment**: What percentage of messages are 1-2 stars? This can indicate frustration or problems.
+
 ```{r sentiment-comparison}
 #| eval: !expr sentiment_files_exist
-#| fig-cap: "Sentiment distribution comparison between user and AI"
+#| fig-cap: "Sentiment distribution comparison between user and AI messages. Higher percentages in 4-5 stars indicate positive sentiment, while 1-2 stars indicate negative sentiment."
 
 sentiment_all %>%
   mutate(
@@ -200,11 +309,22 @@ sentiment_all %>%
   theme(legend.position = "bottom")
 ```
 
-## 2.2 User Sentiment
+## 2.2 User Sentiment Details
+
+**What these charts show:**
+
+1. **Bar chart (count)**: The absolute number of messages in each sentiment category. This shows which emotional tones are most common in user queries.
+   - High 3-star count = mostly neutral, informational requests
+   - High 1-2 star count = users expressing frustration or problems
+   - High 4-5 star count = satisfied, positive interactions
+
+2. **Confidence distribution**: How certain the model is about each prediction.
+   - Peaks near 1.0 = model is very confident
+   - Spread distributions = model is uncertain (could indicate mixed or ambiguous sentiment)
 
 ```{r user-sentiment-detail}
 #| eval: !expr sentiment_files_exist
-#| fig-cap: "Detailed sentiment distribution in user messages"
+#| fig-cap: "User message sentiment distribution (top) and model confidence scores (bottom). Higher confidence scores indicate the model is more certain about the sentiment classification."
 
 p1 <- sentiment_user %>%
   mutate(sentiment_label = str_to_title(sentiment_label)) %>%
@@ -243,11 +363,24 @@ print(p1)
 print(p2)
 ```
 
-## 2.3 AI Sentiment
+## 2.3 AI Sentiment Details
+
+**What these charts show:**
+
+1. **Bar chart (count)**: Distribution of sentiment in AI responses. Ideally, AI should maintain:
+   - High concentration in 3-4 stars (neutral to positive, professional tone)
+   - Very low 1-2 star counts (AI should avoid negative/hostile language)
+   - Moderate 5-star presence (appropriate enthusiasm without being overly effusive)
+
+2. **Confidence distribution**: Model certainty about AI sentiment.
+   - AI responses should generally have higher confidence scores since they're typically more formulaic and professional
+   - Low confidence might indicate unusual or inconsistent AI responses
+
+**Key interpretation**: Compare this to user sentiment (Section 2.2). AI sentiment should be more stable and skewed toward neutral-positive, while user sentiment naturally varies more with their needs and emotions.
 
 ```{r ai-sentiment-detail}
 #| eval: !expr sentiment_files_exist
-#| fig-cap: "Detailed sentiment distribution in AI responses"
+#| fig-cap: "AI response sentiment distribution (top) and model confidence scores (bottom). AI responses typically show more consistent, neutral-to-positive sentiment."
 
 p1 <- sentiment_ai %>%
   mutate(sentiment_label = str_to_title(sentiment_label)) %>%
@@ -284,6 +417,59 @@ p2 <- sentiment_ai %>%
 
 print(p1)
 print(p2)
+```
+
+## 2.4 Sentiment Analysis Summary
+
+**Practical Insights:**
+
+```{r sentiment-insights}
+#| eval: !expr sentiment_files_exist
+#| output: asis
+
+# Calculate key metrics
+user_negative_pct <- mean(sentiment_user$sentiment_label %in% c("1 star", "2 stars")) * 100
+user_neutral_pct <- mean(sentiment_user$sentiment_label == "3 stars") * 100
+user_positive_pct <- mean(sentiment_user$sentiment_label %in% c("4 stars", "5 stars")) * 100
+
+ai_negative_pct <- mean(sentiment_ai$sentiment_label %in% c("1 star", "2 stars")) * 100
+ai_neutral_pct <- mean(sentiment_ai$sentiment_label == "3 stars") * 100
+ai_positive_pct <- mean(sentiment_ai$sentiment_label %in% c("4 stars", "5 stars")) * 100
+
+cat("**User Messages:**\n")
+cat(sprintf("- Negative (1-2 stars): %.1f%%\n", user_negative_pct))
+cat(sprintf("- Neutral (3 stars): %.1f%%\n", user_neutral_pct))
+cat(sprintf("- Positive (4-5 stars): %.1f%%\n\n", user_positive_pct))
+
+cat("**AI Responses:**\n")
+cat(sprintf("- Negative (1-2 stars): %.1f%%\n", ai_negative_pct))
+cat(sprintf("- Neutral (3 stars): %.1f%%\n", ai_neutral_pct))
+cat(sprintf("- Positive (4-5 stars): %.1f%%\n\n", ai_positive_pct))
+
+cat("**What this means:**\n\n")
+
+if (user_positive_pct > 50) {
+  cat("- Users are generally satisfied, with over half showing positive sentiment\n")
+} else if (user_neutral_pct > 50) {
+  cat("- Most user messages are neutral/informational, typical of task-oriented interactions\n")
+} else if (user_negative_pct > 30) {
+  cat("- Significant negative sentiment detected - users may be experiencing frustration\n")
+}
+
+if (ai_positive_pct > ai_negative_pct * 3) {
+  cat("- AI maintains a predominantly positive, helpful tone\n")
+}
+
+if (ai_neutral_pct + ai_positive_pct > 80) {
+  cat("- AI successfully avoids negative language (", sprintf("%.1f%%", ai_neutral_pct + ai_positive_pct), " neutral or positive)\n", sep="")
+}
+
+sentiment_variance_user <- var(table(sentiment_user$sentiment_label))
+sentiment_variance_ai <- var(table(sentiment_ai$sentiment_label))
+
+if (sentiment_variance_ai < sentiment_variance_user) {
+  cat("- AI responses show more consistent sentiment than user messages (expected for professional chatbot behavior)\n")
+}
 ```
 
 ---
