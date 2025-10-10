@@ -1,0 +1,24 @@
+# Secrets and credentials
+.secrets
+
+# R
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# Data files
+data/*.rds
+data/*.csv
+
+# Analysis outputs
+analysis/*.rds
+analysis/*.csv
+analysis/topic_model/
+analysis/topic_model_user/
+analysis/topic_model_ai/
+
+# Output
+*.html
+*.pdf

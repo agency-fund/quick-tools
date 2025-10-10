@@ -1,0 +1,677 @@
+---
+title: "Chatbot Usage Analysis Report"
+author: "Chat Data Analysis"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    theme: cosmo
+    embed-resources: true
+    fig-width: 10
+    fig-height: 6
+execute:
+  warning: false
+  message: false
+  echo: false
+---
+
+```{r setup}
+#| include: false
+library(tidyverse)
+library(tidytext)
+library(lubridate)
+library(scales)
+library(knitr)
+
+# Set theme for plots
+theme_set(theme_minimal(base_size = 13))
+
+# Color palette
+color_user <- "#3498DB"
+color_ai <- "#E67E22"
+color_positive <- "#2ECC71"
+color_neutral <- "#95A5A6"
+color_negative <- "#E74C3C"
+```
+
+# Overview
+
+This report analyzes user interactions with an AI chatbot, examining message patterns, sentiment, topics, and interaction dynamics. The data includes messages primarily in Spanish, with some in English.
+
+---
+
+# Part 1: User Message Analysis {.tabset}
+
+## 1.1 General Summary
+
+```{r user-summary}
+#| output: asis
+# Run the user message summary script
+suppressMessages(source("analysis/01_user_message_summary.R"))
+
+# Load results
+results_summary <- readRDS("analysis/user_message_summary.rds")
+user_messages <- results_summary$user_messages
+top_words <- results_summary$top_words
+```
+
+### Key Statistics
+
+```{r user-stats-table}
+stats_df <- tibble(
+  Metric = c("User Messages",
+             "Unique Conversations",
+             "Average Length",
+             "Median Length",
+             "Period"),
+  Value = c(
+    format(results_summary$summary_stats$total_messages, big.mark = ","),
+    format(results_summary$summary_stats$unique_conversations, big.mark = ","),
+    paste0(round(results_summary$summary_stats$avg_length, 0), " characters"),
+    paste0(results_summary$summary_stats$median_length, " characters"),
+    paste(format(results_summary$summary_stats$date_range[1]), "to",
+          format(results_summary$summary_stats$date_range[2]))
+  )
+)
+
+kable(stats_df, caption = "User Message Statistics")
+```
+
+## 1.2 Length Distribution
+
+```{r message-length-plot}
+#| fig-cap: "Distribution of user message lengths (red line = median)"
+
+ggplot(user_messages, aes(x = msg_length)) +
+  geom_histogram(binwidth = 50, fill = color_user, alpha = 0.7, color = "white") +
+  geom_vline(aes(xintercept = median(msg_length)),
+             color = color_negative, linetype = "dashed", size = 1.2) +
+  labs(
+    title = "User Message Length Distribution",
+    subtitle = "Spanish/English text",
+    x = "Message Length (characters)",
+    y = "Count"
+  ) +
+  theme_minimal(base_size = 13)
+```
+
+## 1.3 Most Common Words
+
+```{r top-words-plot}
+#| fig-cap: "Top 20 most frequent words (after removing stop words)"
+
+top_words %>%
+  head(20) %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(x = n, y = word)) +
+  geom_col(fill = color_user, alpha = 0.8) +
+  geom_text(aes(label = n), hjust = -0.2, size = 3.5) +
+  labs(
+    title = "Most Common Words in User Messages",
+    x = "Frequency",
+    y = NULL
+  ) +
+  expand_limits(x = max(top_words$n[1:20]) * 1.1)
+```
+
+## 1.4 Temporal Activity
+
+```{r messages-over-time}
+#| fig-cap: "User messages over time"
+
+user_messages %>%
+  count(created_date) %>%
+  ggplot(aes(x = created_date, y = n)) +
+  geom_line(color = color_user, size = 1.2) +
+  geom_point(color = color_negative, size = 2.5) +
+  labs(
+    title = "User Message Activity Over Time",
+    x = "Date",
+    y = "Number of Messages"
+  )
+```
+
+---
+
+# Part 2: Sentiment Analysis {.tabset}
+
+Messages were analyzed using a multilingual transformer model that detects sentiment in Spanish and English.
+
+```{r check-sentiment-files}
+# Check if sentiment analysis has been run
+sentiment_files_exist <- all(file.exists(
+  "analysis/sentiment_user.csv",
+  "analysis/sentiment_ai.csv",
+  "analysis/sentiment_all.csv"
+))
+```
+
+::: {.callout-important collapse="false"}
+## Run Sentiment Analysis First
+
+To view this section, first run the sentiment analysis:
+
+```bash
+Rscript analysis/02_prepare_data_for_python.R
+python3 analysis/02_sentiment_analysis.py
+```
+:::
+
+```{r load-sentiment}
+#| eval: !expr sentiment_files_exist
+# Load sentiment results if they exist
+sentiment_user <- read_csv("analysis/sentiment_user.csv", show_col_types = FALSE)
+sentiment_ai <- read_csv("analysis/sentiment_ai.csv", show_col_types = FALSE)
+sentiment_all <- read_csv("analysis/sentiment_all.csv", show_col_types = FALSE)
+```
+
+## 2.1 Sentiment: User vs AI
+
+```{r sentiment-comparison}
+#| eval: !expr sentiment_files_exist
+#| fig-cap: "Sentiment distribution comparison between user and AI"
+
+sentiment_all %>%
+  mutate(
+    sentiment_label = str_to_title(sentiment_label),
+    role_label = ifelse(role == "user", "User", "AI")
+  ) %>%
+  count(role_label, sentiment_label) %>%
+  group_by(role_label) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(x = role_label, y = pct, fill = sentiment_label)) +
+  geom_col(position = "dodge", alpha = 0.8) +
+  geom_text(aes(label = sprintf("%.1f%%", pct)),
+            position = position_dodge(width = 0.9),
+            vjust = -0.5, size = 3.5) +
+  scale_fill_manual(
+    values = c("Negative" = color_negative,
+               "Neutral" = color_neutral,
+               "Positive" = color_positive),
+    name = "Sentiment"
+  ) +
+  labs(
+    title = "Sentiment Distribution: User vs AI",
+    x = NULL,
+    y = "Percentage (%)"
+  ) +
+  theme(legend.position = "bottom")
+```
+
+## 2.2 User Sentiment
+
+```{r user-sentiment-detail}
+#| eval: !expr sentiment_files_exist
+#| fig-cap: "Detailed sentiment distribution in user messages"
+
+p1 <- sentiment_user %>%
+  mutate(sentiment_label = str_to_title(sentiment_label)) %>%
+  count(sentiment_label) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(x = reorder(sentiment_label, n), y = n, fill = sentiment_label)) +
+  geom_col(show.legend = FALSE, alpha = 0.8) +
+  geom_text(aes(label = sprintf("%d\n(%.1f%%)", n, pct)), hjust = -0.2) +
+  coord_flip() +
+  scale_fill_manual(values = c("Negative" = color_negative,
+                                 "Neutral" = color_neutral,
+                                 "Positive" = color_positive)) +
+  labs(
+    title = "Sentiment in User Messages",
+    x = NULL,
+    y = "Count"
+  ) +
+  expand_limits(y = max(table(sentiment_user$sentiment_label)) * 1.2)
+
+p2 <- sentiment_user %>%
+  mutate(sentiment_label = str_to_title(sentiment_label)) %>%
+  ggplot(aes(x = sentiment_score, fill = sentiment_label)) +
+  geom_histogram(binwidth = 0.05, alpha = 0.7, color = "white") +
+  facet_wrap(~sentiment_label, scales = "free_y", ncol = 1) +
+  scale_fill_manual(values = c("Negative" = color_negative,
+                                 "Neutral" = color_neutral,
+                                 "Positive" = color_positive)) +
+  labs(
+    title = "Model Confidence",
+    x = "Confidence Score",
+    y = "Count"
+  ) +
+  theme(legend.position = "none")
+
+print(p1)
+print(p2)
+```
+
+## 2.3 AI Sentiment
+
+```{r ai-sentiment-detail}
+#| eval: !expr sentiment_files_exist
+#| fig-cap: "Detailed sentiment distribution in AI responses"
+
+p1 <- sentiment_ai %>%
+  mutate(sentiment_label = str_to_title(sentiment_label)) %>%
+  count(sentiment_label) %>%
+  mutate(pct = n / sum(n) * 100) %>%
+  ggplot(aes(x = reorder(sentiment_label, n), y = n, fill = sentiment_label)) +
+  geom_col(show.legend = FALSE, alpha = 0.8) +
+  geom_text(aes(label = sprintf("%d\n(%.1f%%)", n, pct)), hjust = -0.2) +
+  coord_flip() +
+  scale_fill_manual(values = c("Negative" = color_negative,
+                                 "Neutral" = color_neutral,
+                                 "Positive" = color_positive)) +
+  labs(
+    title = "Sentiment in AI Responses",
+    x = NULL,
+    y = "Count"
+  ) +
+  expand_limits(y = max(table(sentiment_ai$sentiment_label)) * 1.2)
+
+p2 <- sentiment_ai %>%
+  mutate(sentiment_label = str_to_title(sentiment_label)) %>%
+  ggplot(aes(x = sentiment_score, fill = sentiment_label)) +
+  geom_histogram(binwidth = 0.05, alpha = 0.7, color = "white") +
+  facet_wrap(~sentiment_label, scales = "free_y", ncol = 1) +
+  scale_fill_manual(values = c("Negative" = color_negative,
+                                 "Neutral" = color_neutral,
+                                 "Positive" = color_positive)) +
+  labs(
+    title = "Model Confidence",
+    x = "Confidence Score",
+    y = "Count"
+  ) +
+  theme(legend.position = "none")
+
+print(p1)
+print(p2)
+```
+
+---
+
+# Part 3: Topic Modeling {.tabset}
+
+Thematic analysis using BERTopic to automatically discover themes in user messages and AI responses (Spanish/English text).
+
+```{r check-topic-files}
+# Check if topic modeling has been run
+topic_files_exist <- all(file.exists(
+  "analysis/topic_info_user.csv",
+  "analysis/topic_info_ai.csv",
+  "analysis/message_topics_user.csv",
+  "analysis/message_topics_ai.csv"
+))
+```
+
+::: {.callout-important collapse="false"}
+## Run Topic Modeling First
+
+To view this section, first run the topic modeling:
+
+```bash
+python3 analysis/03_topic_modeling.py
+```
+
+Note: This may take several minutes.
+:::
+
+```{r load-topics}
+#| eval: !expr topic_files_exist
+# Load topic modeling results
+topic_info_user <- read_csv("analysis/topic_info_user.csv", show_col_types = FALSE)
+topic_info_ai <- read_csv("analysis/topic_info_ai.csv", show_col_types = FALSE)
+message_topics_user <- read_csv("analysis/message_topics_user.csv", show_col_types = FALSE)
+message_topics_ai <- read_csv("analysis/message_topics_ai.csv", show_col_types = FALSE)
+```
+
+## 3.1 User Topics
+
+```{r user-topic-header}
+#| eval: !expr topic_files_exist
+#| output: asis
+cat("**Topics discovered:**", nrow(topic_info_user) - 1, "main themes\n\n")
+```
+
+```{r user-topics-table}
+#| eval: !expr topic_files_exist
+topic_info_user %>%
+  filter(Topic != -1) %>%
+  select(Topic, Count, Name) %>%
+  head(10) %>%
+  kable(
+    col.names = c("Topic", "Count", "Keywords"),
+    caption = "Top 10 Topics in User Messages"
+  )
+```
+
+```{r user-topics-plot}
+#| eval: !expr topic_files_exist
+#| fig-cap: "Distribution of main topics in user messages"
+
+topic_info_user %>%
+  filter(Topic != -1) %>%
+  head(12) %>%
+  mutate(
+    Name_short = str_trunc(Name, width = 50),
+    Name_short = reorder(Name_short, Count)
+  ) %>%
+  ggplot(aes(x = Count, y = Name_short)) +
+  geom_col(fill = color_user, alpha = 0.8) +
+  geom_text(aes(label = Count), hjust = -0.2, size = 3.5) +
+  labs(
+    title = "Main Topics in User Messages",
+    subtitle = "Keywords in Spanish/English",
+    x = "Number of Messages",
+    y = "Topic"
+  ) +
+  expand_limits(x = max(head(topic_info_user$Count[topic_info_user$Topic != -1], 12)) * 1.15)
+```
+
+## 3.2 AI Topics
+
+```{r ai-topic-header}
+#| eval: !expr topic_files_exist
+#| output: asis
+cat("**Topics discovered:**", nrow(topic_info_ai) - 1, "main themes\n\n")
+```
+
+```{r ai-topics-table}
+#| eval: !expr topic_files_exist
+topic_info_ai %>%
+  filter(Topic != -1) %>%
+  select(Topic, Count, Name) %>%
+  head(10) %>%
+  kable(
+    col.names = c("Topic", "Count", "Keywords"),
+    caption = "Top 10 Topics in AI Responses"
+  )
+```
+
+```{r ai-topics-plot}
+#| eval: !expr topic_files_exist
+#| fig-cap: "Distribution of main topics in AI responses"
+
+topic_info_ai %>%
+  filter(Topic != -1) %>%
+  head(12) %>%
+  mutate(
+    Name_short = str_trunc(Name, width = 50),
+    Name_short = reorder(Name_short, Count)
+  ) %>%
+  ggplot(aes(x = Count, y = Name_short)) +
+  geom_col(fill = color_ai, alpha = 0.8) +
+  geom_text(aes(label = Count), hjust = -0.2, size = 3.5) +
+  labs(
+    title = "Main Topics in AI Responses",
+    subtitle = "Keywords in Spanish/English",
+    x = "Number of Messages",
+    y = "Topic"
+  ) +
+  expand_limits(x = max(head(topic_info_ai$Count[topic_info_ai$Topic != -1], 12)) * 1.15)
+```
+
+## 3.3 Topic Comparison
+
+```{r topic-size-comparison}
+#| eval: !expr topic_files_exist
+#| fig-cap: "Comparison of average topic sizes between user and AI"
+
+topic_comparison <- tibble(
+  Role = c("User", "AI"),
+  Topics = c(
+    nrow(topic_info_user) - 1,
+    nrow(topic_info_ai) - 1
+  ),
+  Avg_Size = c(
+    mean(topic_info_user$Count[topic_info_user$Topic != -1]),
+    mean(topic_info_ai$Count[topic_info_ai$Topic != -1])
+  ),
+  Total_Messages = c(
+    sum(topic_info_user$Count[topic_info_user$Topic != -1]),
+    sum(topic_info_ai$Count[topic_info_ai$Topic != -1])
+  )
+)
+
+kable(
+  topic_comparison,
+  col.names = c("Role", "Topics", "Avg Size", "Total Messages"),
+  caption = "Topic Comparison: User vs AI",
+  digits = 1
+)
+```
+
+---
+
+# Part 4: Interaction Statistics {.tabset}
+
+Analysis of how users interact with the AI: conversation turns, response times, and usage patterns.
+
+```{r ai-interactions}
+# Run the AI interaction stats script
+suppressMessages(source("analysis/04_ai_interaction_stats.R"))
+
+# Load results
+ai_results <- readRDS("analysis/ai_interaction_stats.rds")
+```
+
+## 4.1 Conversation Metrics
+
+```{r conv-metrics}
+conv_metrics <- tibble(
+  Metric = c(
+    "Total Conversations",
+    "Avg Messages per Conversation",
+    "Avg Turns per Conversation",
+    "Median Turns",
+    "Max Turns",
+    "Avg Conversation Duration"
+  ),
+  Value = c(
+    format(ai_results$overall_stats$total_conversations, big.mark = ","),
+    round(ai_results$overall_stats$total_messages / ai_results$overall_stats$total_conversations, 1),
+    round(mean(ai_results$conv_turns$turns), 1),
+    median(ai_results$conv_turns$turns),
+    max(ai_results$conv_turns$turns),
+    paste0(round(mean(ai_results$conv_turns$duration_minutes, na.rm = TRUE), 1), " mins")
+  )
+)
+
+kable(conv_metrics, caption = "Conversation Metrics")
+```
+
+```{r conv-length-dist}
+#| fig-cap: "Distribution of conversation lengths"
+
+ai_results$conv_turns %>%
+  mutate(
+    length_category = factor(
+      case_when(
+        total_messages <= 2 ~ "1-2 msgs",
+        total_messages <= 5 ~ "3-5 msgs",
+        total_messages <= 10 ~ "6-10 msgs",
+        total_messages <= 20 ~ "11-20 msgs",
+        TRUE ~ "20+ msgs"
+      ),
+      levels = c("1-2 msgs", "3-5 msgs", "6-10 msgs",
+                 "11-20 msgs", "20+ msgs")
+    )
+  ) %>%
+  count(length_category) %>%
+  ggplot(aes(x = length_category, y = n)) +
+  geom_col(fill = "#16A085", alpha = 0.8) +
+  geom_text(aes(label = n), vjust = -0.5, size = 4) +
+  labs(
+    title = "Distribution of Conversation Lengths",
+    x = "Conversation Length",
+    y = "Number of Conversations"
+  )
+```
+
+## 4.2 AI Response Characteristics
+
+```{r ai-response-stats}
+ai_stats_df <- tibble(
+  Metric = c(
+    "Total AI Responses",
+    "Avg Response Length",
+    "Median Response Length",
+    "Responses with Tool Calls"
+  ),
+  Value = c(
+    format(nrow(ai_results$ai_stats), big.mark = ","),
+    paste0(round(mean(ai_results$ai_stats$response_length, na.rm = TRUE), 0), " chars"),
+    paste0(median(ai_results$ai_stats$response_length, na.rm = TRUE), " chars"),
+    sprintf("%d (%.1f%%)",
+            sum(ai_results$ai_stats$has_tool_call, na.rm = TRUE),
+            100 * mean(ai_results$ai_stats$has_tool_call, na.rm = TRUE))
+  )
+)
+
+kable(ai_stats_df, caption = "AI Response Characteristics")
+```
+
+```{r response-length-dist}
+#| fig-cap: "Distribution of AI response lengths (red line = median)"
+
+ggplot(ai_results$ai_stats, aes(x = response_length)) +
+  geom_histogram(binwidth = 100, fill = color_ai, alpha = 0.7, color = "white") +
+  geom_vline(aes(xintercept = median(response_length)),
+             color = color_negative, linetype = "dashed", size = 1.2) +
+  labs(
+    title = "Distribution of AI Response Lengths",
+    x = "Response Length (characters)",
+    y = "Count"
+  )
+```
+
+## 4.3 Usage Patterns
+
+```{r hourly-usage}
+#| fig-cap: "Message activity by hour of day"
+
+ai_results$hour_stats %>%
+  ggplot(aes(x = hour, y = n)) +
+  geom_col(fill = "#34495E", alpha = 0.8) +
+  geom_text(aes(label = n), vjust = -0.5, size = 3) +
+  scale_x_continuous(breaks = 0:23) +
+  labs(
+    title = "Message Activity by Hour of Day",
+    x = "Hour of Day (0-23)",
+    y = "Number of Messages"
+  )
+```
+
+```{r daily-activity}
+#| fig-cap: "Daily message activity"
+
+ai_results$temporal_stats %>%
+  ggplot(aes(x = date, y = messages_per_day)) +
+  geom_line(color = "#2C3E50", size = 1.2) +
+  geom_point(color = color_negative, size = 2.5) +
+  labs(
+    title = "Daily Message Activity",
+    x = "Date",
+    y = "Messages per Day"
+  )
+```
+
+## 4.4 User-AI Comparison
+
+```{r user-ai-length-comparison}
+#| fig-cap: "Message length comparison: User vs AI"
+
+# Combine user and AI messages - filter out any NAs
+user_lengths <- results_summary$user_messages %>%
+  filter(!is.na(msg_length)) %>%
+  transmute(role_label = "User", msg_length)
+
+ai_lengths <- ai_results$ai_stats %>%
+  filter(!is.na(response_length)) %>%
+  transmute(role_label = "AI", msg_length = response_length)
+
+messages_combined <- bind_rows(user_lengths, ai_lengths)
+
+ggplot(messages_combined, aes(x = role_label, y = msg_length, fill = role_label)) +
+  geom_violin(alpha = 0.6, draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_boxplot(width = 0.2, alpha = 0.8, outlier.alpha = 0.3) +
+  scale_fill_manual(values = c("User" = color_user, "AI" = color_ai)) +
+  scale_y_log10(labels = comma) +
+  labs(
+    title = "Message Length Comparison: User vs AI",
+    subtitle = "Log scale",
+    x = NULL,
+    y = "Message Length (characters, log scale)",
+    fill = "Role"
+  ) +
+  theme(legend.position = "none")
+```
+
+---
+
+# Summary
+
+## Key Findings
+
+### 1. User Behavior
+
+- Users send messages averaging **`r round(results_summary$summary_stats$avg_length, 0)` characters**
+- Most common words reveal main topics of interest
+- Sentiment distribution shows emotional variety in queries
+
+### 2. Sentiment Analysis
+
+```{r sentiment-summary}
+#| eval: !expr sentiment_files_exist
+user_sent_pct <- sentiment_user %>%
+  count(sentiment_label) %>%
+  mutate(pct = n / sum(n) * 100)
+
+ai_sent_pct <- sentiment_ai %>%
+  count(sentiment_label) %>%
+  mutate(pct = n / sum(n) * 100)
+```
+
+```{r sentiment-summary-text}
+#| eval: !expr sentiment_files_exist
+#| output: asis
+cat("- **User:** Primarily", user_sent_pct$sentiment_label[which.max(user_sent_pct$n)],
+    sprintf("(%.1f%%)\n", round(max(user_sent_pct$pct), 1)))
+cat("- **AI:** Primarily", ai_sent_pct$sentiment_label[which.max(ai_sent_pct$n)],
+    sprintf("(%.1f%%)\n", round(max(ai_sent_pct$pct), 1)))
+cat("- AI maintains a more consistently neutral/positive tone\n\n")
+```
+
+```{r sentiment-not-run}
+#| eval: !expr if (exists("sentiment_files_exist")) !sentiment_files_exist else TRUE
+#| output: asis
+if (!exists("sentiment_files_exist") || !sentiment_files_exist) {
+  cat("*(Run sentiment analysis to see results)*\n\n")
+}
+```
+
+### 3. Discovered Topics
+
+```{r topics-summary-text}
+#| eval: !expr topic_files_exist
+#| output: asis
+cat("- **User Topics:**", nrow(topic_info_user) - 1, "main themes identified\n")
+cat("- **AI Topics:**", nrow(topic_info_ai) - 1, "main themes in responses\n")
+cat("- Topics reflect the most frequent areas of knowledge and inquiry\n\n")
+```
+
+```{r topics-not-run}
+#| eval: !expr if (exists("topic_files_exist")) !topic_files_exist else TRUE
+#| output: asis
+if (!exists("topic_files_exist") || !topic_files_exist) {
+  cat("*(Run topic modeling to see results)*\n\n")
+}
+```
+
+### 4. Interaction Dynamics
+
+- Average of **`r round(mean(ai_results$conv_turns$turns), 1)` turns** per conversation
+- AI responses average **`r round(mean(ai_results$ai_stats$response_length, na.rm = TRUE), 0)` characters**
+- AI responds with more detail than user queries
+
+---
+
+**Report generated on:** `r format(Sys.Date(), "%B %d, %Y")`

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(test:*)",
+      "Bash(Rscript:*)",
+      "Bash(chmod:*)",
+      "Bash(quarto render:*)",
+      "Bash(1)",
+      "Read(//Users/michaelfive/**)",
+      "Bash(python3:*)",
+      "Bash(pip3 install:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
