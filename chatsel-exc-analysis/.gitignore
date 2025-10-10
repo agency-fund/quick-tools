@@ -18,6 +18,8 @@ analysis/*.csv
 analysis/topic_model/
 analysis/topic_model_user/
 analysis/topic_model_ai/
+analysis/topic_model_user
+analysis/topic_model_ai
 
 # Output
 *.html
